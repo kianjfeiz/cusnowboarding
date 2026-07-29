@@ -1,0 +1,74 @@
+# Local topology deliberately mirrors production (Neon): the app talks to a
+# transaction-mode pooler, never straight to Postgres. The claim path is a
+# single statement precisely so it is safe under this topology, and testing
+# through the pooler is the only way to prove that.
+#
+#   55432 -> postgres directly  (migrations, seeding, psql)
+#    6432 -> pgbouncer          (the app, and every race test)
+#
+# Postgres is published on 55432 rather than 5432 to avoid colliding with a
+# natively installed Postgres on the host.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cusnow-postgres
+    environment:
+      POSTGRES_USER: cusnow
+      POSTGRES_PASSWORD: cusnow_local_dev
+      POSTGRES_DB: cusnow
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "55432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    command:
+      - postgres
+      # The race suite opens ~100 direct connections in some tests; the default
+      # of 100 leaves no headroom for pgbouncer's own server pool.
+      - -c
+      - max_connections=300
+      - -c
+      - log_min_duration_statement=200
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cusnow -d cusnow"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    container_name: cusnow-pgbouncer
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: cusnow
+      DB_PASSWORD: cusnow_local_dev
+      DB_NAME: cusnow
+      # Transaction pooling is what Neon and Supabase both give you. Session
+      # pooling would hide bugs that only appear in production.
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+      MAX_CLIENT_CONN: "1000"
+      DEFAULT_POOL_SIZE: "50"
+      MIN_POOL_SIZE: "10"
+      RESERVE_POOL_SIZE: "10"
+      # PgBouncer queues waiting clients FIFO, which preserves arrival order
+      # into Postgres. Fail fast rather than let a drop-night pile-up hang.
+      QUERY_WAIT_TIMEOUT: "15"
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits,options
+      ADMIN_USERS: cusnow
+    ports:
+      - "6432:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U cusnow -d cusnow"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:

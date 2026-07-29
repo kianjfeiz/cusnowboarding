@@ -1,26 +1,73 @@
 @import "tailwindcss";
 
+/*
+ * A deliberately small palette: paper, ink, a single accent, and one alert
+ * colour. Status is carried by label and weight rather than by hue, so a
+ * roster of 25 rows stays readable.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --paper: #ffffff;
+  --surface: #f7f7f8;
+  --surface-strong: #eeeef1;
+  --border: #e0e0e5;
+  --border-strong: #c9c9d1;
+  --ink: #16161a;
+  --ink-muted: #6b6b76;
+  --ink-faint: #9a9aa5;
+  --accent: #1f4fd8;
+  --accent-hover: #1a43ba;
+  --accent-soft: #eef2fe;
+  --alert: #b3261e;
+  --alert-soft: #fdeceb;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --paper: #0d0d10;
+    --surface: #161619;
+    --surface-strong: #1f1f24;
+    --border: #2a2a31;
+    --border-strong: #3d3d46;
+    --ink: #ececf0;
+    --ink-muted: #9d9da8;
+    --ink-faint: #6f6f7a;
+    --accent: #7d9bff;
+    --accent-hover: #93abff;
+    --accent-soft: #191f33;
+    --alert: #f2867d;
+    --alert-soft: #2a1917;
   }
 }
 
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-alert: var(--alert);
+  --color-alert-soft: var(--alert-soft);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* Countdowns and spot numbers use tabular figures so they do not jitter. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

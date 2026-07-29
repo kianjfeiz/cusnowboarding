@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "payments_one_open_per_signup" ON "payments" USING btree ("signup_id") WHERE status = 'open';
