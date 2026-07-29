@@ -1,54 +1,65 @@
+import { formatInTimeZone } from "date-fns-tz";
 import { TripForm } from "@/components/admin/trip-form";
 import { PageHeader } from "@/components/admin/shell";
 import { requireCapability } from "../../_lib/actor";
-import { toDenverInput } from "../../_lib/datetime";
+import { DENVER } from "../../_lib/datetime";
 import { createTrip } from "../actions";
 
 export const dynamic = "force-dynamic";
 
-/** Next Tuesday at 8pm Mountain, which is when the club has always dropped trips. */
-function defaultDrop(): Date {
-  const now = new Date();
-  const days = (2 - now.getDay() + 7) % 7 || 7;
-  const drop = new Date(now);
-  drop.setDate(drop.getDate() + days);
-  drop.setHours(20, 0, 0, 0);
-  return drop;
+/**
+ * Today's date in Denver, carried as a UTC midnight so that adding days below
+ * is plain calendar arithmetic. Doing this with the server's local clock puts
+ * the default drop at 1pm Mountain when the server is in UTC, which is where it
+ * actually runs.
+ */
+function denverToday(): Date {
+  const [year, month, day] = formatInTimeZone(new Date(), DENVER, "yyyy-MM-dd")
+    .split("-")
+    .map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function inputValue(day: Date, time: string): string {
+  return `${day.toISOString().slice(0, 10)}T${time}`;
 }
 
 export default async function NewTripPage() {
   await requireCapability("manageTrips");
 
-  const drop = defaultDrop();
-  const depart = new Date(drop.getTime() + 21 * 24 * 3_600_000);
+  // The club has always dropped at 8pm on a Tuesday, and the trip is the
+  // Saturday after next - eleven days on from a Tuesday.
+  const drop = denverToday();
+  drop.setUTCDate(drop.getUTCDate() + ((2 - drop.getUTCDay() + 7) % 7 || 7));
+  const depart = new Date(drop);
+  depart.setUTCDate(depart.getUTCDate() + 11);
 
   return (
     <div className="max-w-3xl">
       <PageHeader
         title="New trip"
-        subtitle="Saved as a draft. Nothing is visible to members until you publish."
+        subtitle="It goes on the schedule as soon as you save. Signups open by themselves at the time you set - there is nothing to press on drop night."
         back={{ href: "/admin/trips", label: "Back to trips" }}
       />
 
       <TripForm
         action={createTrip}
-        submitLabel="Create draft"
+        submitLabel="Create trip"
         cancelHref="/admin/trips"
         defaults={{
           title: "",
           slug: "",
           resort: "",
           description: "",
-          departAt: toDenverInput(depart),
+          departAt: inputValue(depart, "06:00"),
           returnAt: "",
-          signupOpensAt: toDenverInput(drop),
-          signupClosesAt: "",
+          signupOpensAt: inputValue(drop, "20:00"),
           priceDollars: "85",
           capacity: "25",
           waitlistCap: "50",
           paymentWindowHours: "48",
           requiresDues: true,
-    paymentUrl: "",
+          paymentUrl: "",
         }}
       />
     </div>

@@ -42,7 +42,18 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           </nav>
 
           <div className="ml-auto flex items-center gap-3 text-xs text-ink-faint">
-            <span>{actor.name ?? actor.email}</span>
+            {/*
+              The way back out. A board member is also someone who goes on trips,
+              and the member site links in here - without this the board area is
+              a one-way door and the only escape is editing the URL.
+            */}
+            <Link
+              href="/"
+              className="rounded-md border border-border px-2 py-1 text-ink-muted transition-colors hover:bg-surface hover:text-ink"
+            >
+              Member view
+            </Link>
+            <span className="hidden sm:inline">{actor.name ?? actor.email}</span>
             <form action={signOutAction}>
               <button
                 type="submit"

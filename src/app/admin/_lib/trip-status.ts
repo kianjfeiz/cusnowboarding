@@ -1,44 +1,29 @@
 import type { TripStatus } from "@/lib/db/schema";
 
 /**
- * Allowed status moves, written out rather than inferred, so "can a closed trip
- * be reopened" has one answer instead of three buttons that disagree.
+ * Which moves the board can still make, written out rather than inferred.
+ *
+ * Three states are reachable now: scheduled, closed, cancelled.
+ *
+ * `open` is gone as a destination. The claim statement accepts a scheduled trip
+ * once `signup_opens_at` has passed, so publishing IS scheduling and the clock
+ * does the rest - a button that had to be pressed at 8pm was a single point of
+ * silent failure. `draft` is gone because a scheduled trip in the future
+ * already is one: nobody can claim before the drop, and a trip the board cannot
+ * see on its own list is a trip nobody remembers to publish. `completed` is
+ * gone because marking it hid the trip from the payments totals, which is the
+ * opposite of what a trip with money still owed needs.
+ *
+ * All three stay listed as *sources* so that rows written before this still
+ * have a way out.
  */
 const TRANSITIONS: Record<TripStatus, TripStatus[]> = {
   draft: ["scheduled", "cancelled"],
-  scheduled: ["open", "draft", "cancelled"],
+  scheduled: ["closed", "cancelled"],
   open: ["closed", "cancelled"],
-  closed: ["open", "completed"],
-  cancelled: ["draft"],
+  closed: ["scheduled", "cancelled"],
+  cancelled: ["scheduled"],
   completed: [],
-};
-
-/** Label for the button that moves a trip *into* this status. */
-export const TRANSITION_LABELS: Record<TripStatus, string> = {
-  draft: "Back to draft",
-  scheduled: "Publish",
-  open: "Open now",
-  closed: "Close signups",
-  cancelled: "Cancel trip",
-  completed: "Mark completed",
-};
-
-export const TRIP_STATUS_LABELS: Record<TripStatus, string> = {
-  draft: "Draft",
-  scheduled: "Scheduled",
-  open: "Open",
-  closed: "Closed",
-  cancelled: "Cancelled",
-  completed: "Completed",
-};
-
-export const TRIP_STATUS_HINTS: Record<TripStatus, string> = {
-  draft: "Not visible to members",
-  scheduled: "Visible, signups not open yet",
-  open: "Members can claim spots",
-  closed: "No further claims",
-  cancelled: "Called off",
-  completed: "Done and settled",
 };
 
 export function nextStatuses(status: TripStatus): TripStatus[] {
@@ -48,3 +33,66 @@ export function nextStatuses(status: TripStatus): TripStatus[] {
 export function canTransition(from: TripStatus, to: TripStatus): boolean {
   return nextStatuses(from).includes(to);
 }
+
+/** The same destination reads differently depending on where the trip is. */
+export function transitionLabel(from: TripStatus, to: TripStatus): string {
+  if (to === "cancelled") return "Cancel trip";
+  if (to === "closed") return "Close signups";
+  if (from === "closed") return "Reopen signups";
+  if (from === "cancelled") return "Restore trip";
+  return "Publish";
+}
+
+/**
+ * What is actually happening to a trip, which is not what the status column
+ * says. A scheduled trip is claimable or not depending only on the clock, so
+ * the board reading this row at 7:58pm needs the answer derived from the same
+ * two timestamps the claim statement reads.
+ */
+export type TripPhase =
+  | "draft"
+  | "upcoming"
+  | "live"
+  | "over"
+  | "closed"
+  | "cancelled"
+  | "completed";
+
+export interface PhaseInput {
+  status: TripStatus;
+  signup_opens_at: Date | string;
+  signup_closes_at: Date | string | null;
+}
+
+export function tripPhase(trip: PhaseInput, now: number = Date.now()): TripPhase {
+  if (trip.status === "cancelled") return "cancelled";
+  if (trip.status === "completed") return "completed";
+  if (trip.status === "closed") return "closed";
+  if (trip.status === "draft") return "draft";
+
+  if (new Date(trip.signup_opens_at).getTime() > now) return "upcoming";
+
+  const closes = trip.signup_closes_at ? new Date(trip.signup_closes_at).getTime() : null;
+  if (closes !== null && closes <= now) return "over";
+  return "live";
+}
+
+export const PHASE_LABELS: Record<TripPhase, string> = {
+  draft: "Draft",
+  upcoming: "Scheduled",
+  live: "Signups live",
+  over: "Signups over",
+  closed: "Closed early",
+  cancelled: "Cancelled",
+  completed: "Completed",
+};
+
+export const PHASE_HINTS: Record<TripPhase, string> = {
+  draft: "Hidden from members until published",
+  upcoming: "Opens on its own at the drop time",
+  live: "Members can claim right now",
+  over: "The signup window has passed",
+  closed: "Closed by the board, no further claims",
+  cancelled: "Called off",
+  completed: "Done and settled",
+};

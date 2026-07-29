@@ -284,3 +284,42 @@ describe("Test F - crash safety", () => {
     }
   });
 });
+
+describe("Auto-open", () => {
+  test("a scheduled trip whose time has come accepts claims without a manual open", async () => {
+    // The manual "open now" step is gone: forgetting it used to fail silently
+    // and totally at 8pm. The clock is the authority.
+    const tripId = await createTestTrip({ capacity: 5, status: "scheduled" });
+    const result = await claimSpot(clients[0], tripId, memberIds[0], generatePayToken());
+
+    expect(result.outcome).toBe("held");
+  });
+
+  test("a scheduled trip whose time has NOT come still rejects", async () => {
+    const tripId = await createTestTrip({
+      capacity: 5,
+      status: "scheduled",
+      signupOpensAt: "now() + interval '1 hour'",
+    });
+    const result = await claimSpot(clients[0], tripId, memberIds[0], generatePayToken());
+
+    expect(result.outcome).toBe("not_open");
+    expect(await getSignups(tripId)).toEqual([]);
+  });
+
+  test("a closed trip rejects even after its open time", async () => {
+    const tripId = await createTestTrip({ capacity: 5, status: "closed" });
+    const result = await claimSpot(clients[0], tripId, memberIds[0], generatePayToken());
+
+    expect(result.outcome).toBe("not_open");
+    expect(await getSignups(tripId)).toEqual([]);
+  });
+
+  test("a draft trip rejects", async () => {
+    const tripId = await createTestTrip({ capacity: 5, status: "draft" });
+    const result = await claimSpot(clients[0], tripId, memberIds[0], generatePayToken());
+
+    expect(result.outcome).toBe("not_open");
+    expect(await getSignups(tripId)).toEqual([]);
+  });
+});

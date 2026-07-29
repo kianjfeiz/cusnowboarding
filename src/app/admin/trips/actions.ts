@@ -8,6 +8,7 @@ import { requireCapability } from "../_lib/actor";
 import { recordAudit } from "../_lib/audit";
 import { parseDenverInput } from "../_lib/datetime";
 import { canTransition } from "../_lib/trip-status";
+import { signupClosesAt as signupWindowEnd } from "@/lib/signup-window";
 
 export interface TripFormState {
   error?: string;
@@ -66,10 +67,9 @@ function parseTripForm(formData: FormData): Parsed {
   const signupOpensAt = parseDenverInput(text(formData, "signupOpensAt"));
   if (!signupOpensAt) return { ok: false, error: "Signups must have an opening time." };
 
-  const signupClosesAt = parseDenverInput(text(formData, "signupClosesAt"));
-  if (signupClosesAt && signupClosesAt <= signupOpensAt) {
-    return { ok: false, error: "Signups cannot close before they open." };
-  }
+  // Derived, not entered. The drop is decided in the first seconds, so a manual
+  // close time was only ever another field to get wrong.
+  const signupClosesAt = signupWindowEnd(signupOpensAt);
 
   // The board thinks in dollars; the database stores cents so that no rounding
   // ever happens on the money path.
@@ -167,6 +167,18 @@ export async function createTrip(
   if (!parsed.ok) return { error: parsed.error };
   const v = parsed.value;
 
+  // A new trip is created scheduled, and a scheduled trip claims itself open
+  // the moment its clock arrives - so a drop time in the past is not a harmless
+  // typo, it is a trip that is live to every member the instant it is saved.
+  // Only checked on create: editing a trip that has already run is normal.
+  if (v.signupOpensAt.getTime() <= Date.now()) {
+    return {
+      error:
+        "The signup open time is in the past. The trip opens itself at that moment, " +
+        "so pick a time still to come.",
+    };
+  }
+
   let tripId: string;
   try {
     const rows = await execute<{ id: string }>(
@@ -174,7 +186,7 @@ export async function createTrip(
          slug, title, resort, description, depart_at, return_at, price_cents,
          capacity, waitlist_cap, signup_opens_at, signup_closes_at,
          payment_window_hours, requires_dues, payment_url, status, created_by
-       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'draft',$15)
+       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'scheduled',$15)
        returning id`,
       [
         v.slug, v.title, v.resort, v.description, v.departAt, v.returnAt, v.priceCents,
@@ -197,7 +209,10 @@ export async function createTrip(
   });
 
   revalidatePath("/admin/trips");
-  redirect(`/admin/trips/${tripId}`);
+  revalidatePath("/admin");
+  // Back to the list rather than the empty roster: the board's first question
+  // after saving is "is it really on the schedule", and the list answers it.
+  redirect("/admin/trips");
 }
 
 export async function updateTrip(

@@ -54,7 +54,9 @@ async function main() {
   const [president] = await db
     .insert(schema.boardUsers)
     .values({
-      email: "vafeiz@gmail.com",
+      // Must be a CU address: sign-in rejects any other domain, so a personal
+      // address in board_users can never actually reach the admin.
+      email: "kife1762@colorado.edu",
       name: "Club President",
       isSuperadmin: true,
     })

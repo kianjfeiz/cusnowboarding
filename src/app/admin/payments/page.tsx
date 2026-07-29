@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { EmptyRow, PageHeader, Section, Stat, TableWrap, Td, Th } from "@/components/admin/shell";
 import { SubmitButton } from "@/components/admin/submit-button";
-import { Badge, Button, Input, Notice, cn, formatDenver, formatMoney } from "@/components/ui";
+import { Badge, Button, Input, Notice, formatDenver, formatMoney } from "@/components/ui";
 import { can } from "@/lib/authz";
 import { requireCapability } from "../_lib/actor";
 import {
@@ -14,9 +14,9 @@ import {
   PAYMENT_STATE_LABELS,
   filterPaymentLines,
   getPaymentTotals,
+  listLiveTrips,
   listPaymentLines,
   listPaymentTripOptions,
-  listTripPaymentTotals,
   outstandingCents,
   paidVia,
   parsePaymentFilter,
@@ -57,25 +57,27 @@ export default async function PaymentsPage({
   const mayManage = can(actor, "managePayments");
 
   const params = await searchParams;
-  const filter = parsePaymentFilter(params.status);
+  // The page opens on what the treasurer came for: the people who still owe
+  // money. The full ledger is one selection away.
+  const filter = parsePaymentFilter(params.status ?? "owing");
 
   const tripOptions = await listPaymentTripOptions();
   const tripId = resolveTripId(params.trip, tripOptions);
 
-  const [totals, byTrip, allLines] = await Promise.all([
+  const [totals, liveTrips, allLines] = await Promise.all([
     getPaymentTotals(),
-    listTripPaymentTotals(),
+    listLiveTrips(),
     listPaymentLines(tripId),
   ]);
 
   const now = Date.now();
   const lines = filterPaymentLines(allLines, filter, now);
   const outstanding = outstandingCents(totals);
-  const unsettled = totals.unpaid_count + totals.lapsed_count;
+  const noLink = liveTrips.filter((trip) => !trip.payment_url);
 
   // The batch reminder has its own scope, kept separate from the table filters
   // so that narrowing the table cannot silently change who gets mailed.
-  const mailTripId = byTrip.some((trip) => trip.trip_id === params.mailTrip)
+  const mailTripId = liveTrips.some((trip) => trip.id === params.mailTrip)
     ? params.mailTrip!
     : null;
   const includeLapsed = params.mailLapsed === "1";
@@ -85,23 +87,21 @@ export default async function PaymentsPage({
     : [];
 
   const sentCount = Number(params.mailSent ?? "");
-  const failedCount = Number(params.mailFailed ?? "");
-  const sendReport = Number.isFinite(sentCount) && params.mailSent !== undefined
-    ? { sent: sentCount, failed: Number.isFinite(failedCount) ? failedCount : 0 }
-    : null;
+  const sendReport =
+    params.mailSent !== undefined && Number.isFinite(sentCount)
+      ? { sent: sentCount, failed: Number(params.mailFailed ?? 0) || 0 }
+      : null;
 
-  const query = new URLSearchParams();
-  if (filter !== "all") query.set("status", filter);
-  if (tripId) query.set("trip", tripId);
-  const search = query.toString();
-  const csvHref = `/admin/payments/reconciliation.csv${search ? `?${search}` : ""}`;
-  const filtered = search !== "";
+  const narrowed = params.status !== undefined || tripId !== null;
+  // Reconciliation is done against the whole ledger, so the export follows the
+  // chosen trip but never the status filter.
+  const csvHref = `/admin/payments/reconciliation.csv${tripId ? `?trip=${tripId}` : ""}`;
 
   return (
     <>
       <PageHeader
         title="Payments"
-        subtitle="Who has paid, who has not, and what the club is still owed. The club bills through Fusion, which this app cannot read, so a spot is paid once someone here records it. Totals cover scheduled, open, and closed trips. All times are Mountain."
+        subtitle="The club bills through Fusion, which this app cannot read, so a spot counts as paid once someone records it here. Times are Mountain."
         actions={
           mayManage ? (
             <a
@@ -121,125 +121,55 @@ export default async function PaymentsPage({
             title={`${sendReport.sent} reminder${sendReport.sent === 1 ? "" : "s"} sent`}
           >
             {sendReport.failed > 0
-              ? `${sendReport.failed} could not be delivered and were not retried. The addresses are recorded in the audit log; chase those members individually rather than resending the batch.`
+              ? `${sendReport.failed} could not be delivered and were not retried. The addresses are in the audit log; chase those members individually rather than resending the batch.`
               : "Every member in that scope was emailed individually."}
           </Notice>
         </div>
       ) : null}
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {noLink.length > 0 ? (
+        <div className="mb-6">
+          <Notice title="No payment link set">
+            Members have nowhere to pay for{" "}
+            {noLink.map((trip, index) => (
+              <span key={trip.id}>
+                {index > 0 ? ", " : ""}
+                <Link
+                  href={`/admin/trips/${trip.id}/edit`}
+                  className="text-accent underline underline-offset-4"
+                >
+                  {trip.title}
+                </Link>
+              </span>
+            ))}
+            . Set the Fusion link on the trip.
+          </Notice>
+        </div>
+      ) : null}
+
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:max-w-lg">
         <Stat
-          label="Expected"
-          value={formatMoney(totals.expected_cents)}
-          detail={`${totals.allocated_count} spot${totals.allocated_count === 1 ? "" : "s"} allocated`}
+          label="Outstanding"
+          value={formatMoney(outstanding)}
+          detail={`${totals.unpaid_count} unpaid, ${totals.lapsed_count} lapsed`}
         />
         <Stat
           label="Collected"
           value={formatMoney(totals.collected_cents)}
-          detail={
-            totals.refunded_cents > 0
-              ? `${totals.paid_count} paid, ${formatMoney(totals.refunded_cents)} refunded`
-              : `${totals.paid_count} paid`
-          }
-        />
-        <Stat
-          label="Outstanding"
-          value={formatMoney(outstanding)}
-          detail={`${unsettled} spot${unsettled === 1 ? "" : "s"} not settled`}
-        />
-        <Stat
-          label="Unpaid"
-          value={totals.unpaid_count}
-          detail={
-            totals.lapsed_count > 0
-              ? `Plus ${totals.lapsed_count} lapsed hold${totals.lapsed_count === 1 ? "" : "s"}`
-              : "No lapsed holds"
-          }
+          detail={`${totals.paid_count} paid`}
         />
       </div>
-
-      <div className="mb-6">
-        <Section
-          title="By trip"
-          description="Live trips only. Filled counts paid spots plus holds still inside their payment window. The payment link is what members are sent; it is set on the trip."
-        >
-          <TableWrap>
-            <table className="w-full text-sm">
-              <thead className="border-b border-border">
-                <tr>
-                  <Th>Trip</Th>
-                  <Th>Payment link</Th>
-                  <Th className="text-right">Filled</Th>
-                  <Th className="text-right">Collected</Th>
-                  <Th className="text-right">Expected</Th>
-                  <Th className="text-right">Outstanding</Th>
-                  <Th className="text-right">Paid</Th>
-                  <Th className="text-right">Unpaid</Th>
-                  <Th className="text-right">Lapsed</Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {byTrip.length === 0 ? (
-                  <EmptyRow colSpan={9}>No live trips.</EmptyRow>
-                ) : (
-                  byTrip.map((trip) => (
-                    <tr key={trip.trip_id} className="hover:bg-surface">
-                      <Td>
-                        <Link
-                          href={`/admin/trips/${trip.trip_id}`}
-                          className="font-medium hover:underline"
-                        >
-                          {trip.title}
-                        </Link>
-                        <span className="mt-0.5 block text-xs text-ink-faint">
-                          Departs {at(trip.depart_at)}
-                        </span>
-                      </Td>
-                      <Td>
-                        <PaymentLink url={trip.payment_url} />
-                      </Td>
-                      <Td className="tnum whitespace-nowrap text-right text-ink-muted">
-                        {trip.spots_filled}/{trip.capacity}
-                      </Td>
-                      <Td className="tnum whitespace-nowrap text-right">
-                        {formatMoney(trip.collected_cents)}
-                      </Td>
-                      <Td className="tnum whitespace-nowrap text-right text-ink-muted">
-                        {formatMoney(trip.expected_cents)}
-                      </Td>
-                      <Td className="tnum whitespace-nowrap text-right text-ink-muted">
-                        {formatMoney(outstandingCents(trip))}
-                      </Td>
-                      <Td className="tnum text-right text-ink-muted">{trip.paid_count}</Td>
-                      <Td className="tnum text-right text-ink-muted">{trip.unpaid_count}</Td>
-                      <Td className="tnum text-right text-ink-muted">{trip.lapsed_count}</Td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </TableWrap>
-        </Section>
-      </div>
-
-      {mayManage ? (
-        <div className="mb-6">
-          <UnpaidMailer
-            trips={byTrip.map((trip) => ({ id: trip.trip_id, title: trip.title }))}
-            mailTripId={mailTripId}
-            includeLapsed={includeLapsed}
-            previewing={previewing}
-            recipients={recipients}
-          />
-        </div>
-      ) : null}
 
       <Section
-        title={`${lines.length} signup${lines.length === 1 ? "" : "s"}`}
+        title={
+          filter === "all"
+            ? `${lines.length} signup${lines.length === 1 ? "" : "s"}`
+            : `${lines.length} ${filter}`
+        }
         description={
           allLines.length >= LINE_LIMIT
-            ? `Showing the first ${LINE_LIMIT}. Filter by trip to narrow it down.`
-            : "Everyone who owes money or has paid it, in trip and spot order."
+            ? `Showing the first ${LINE_LIMIT}. Pick a trip to narrow it down.`
+            : undefined
         }
         actions={
           <form method="get" className="flex flex-wrap items-center gap-2">
@@ -261,12 +191,12 @@ export default async function PaymentsPage({
             <Button type="submit" variant="secondary" className="h-8 px-3 text-xs">
               Apply
             </Button>
-            {filtered ? (
+            {narrowed ? (
               <Link
                 href="/admin/payments"
                 className="text-xs text-ink-muted underline underline-offset-4 hover:text-ink"
               >
-                Clear
+                Reset
               </Link>
             ) : null}
           </form>
@@ -277,23 +207,19 @@ export default async function PaymentsPage({
             <thead className="border-b border-border">
               <tr>
                 <Th>Member</Th>
-                <Th>Email</Th>
                 <Th>Trip</Th>
-                <Th className="text-right">Spot</Th>
                 <Th className="text-right">Amount</Th>
                 <Th>Status</Th>
-                <Th>Paid via</Th>
-                <Th>Paid</Th>
-                <Th>Deadline</Th>
+                <Th>Recorded</Th>
                 {mayManage ? <Th /> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {lines.length === 0 ? (
-                <EmptyRow colSpan={mayManage ? 10 : 9}>
-                  {filtered
-                    ? "Nothing matches that filter."
-                    : "Nobody has claimed a spot yet."}
+                <EmptyRow colSpan={mayManage ? 6 : 5}>
+                  {filter === "owing"
+                    ? "Nobody owes the club money."
+                    : "Nothing matches that filter."}
                 </EmptyRow>
               ) : (
                 lines.map((line) => (
@@ -304,6 +230,18 @@ export default async function PaymentsPage({
           </table>
         </TableWrap>
       </Section>
+
+      {mayManage ? (
+        <div className="mt-6">
+          <UnpaidMailer
+            trips={liveTrips}
+            mailTripId={mailTripId}
+            includeLapsed={includeLapsed}
+            previewing={previewing}
+            recipients={recipients}
+          />
+        </div>
+      ) : null}
     </>
   );
 }
@@ -335,11 +273,12 @@ function UnpaidMailer({
   const overCap = recipients.length > MAX_BATCH;
 
   return (
-    <Section
-      title="Email unpaid members"
-      description="One personalised message per member, each with their own payment link. Nobody sees anyone else's address."
-    >
-      <div className="space-y-4 px-5 py-4">
+    <details open={previewing} className="rounded-lg border border-border bg-paper">
+      <summary className="cursor-pointer px-5 py-3.5 text-sm font-semibold text-ink">
+        Email members who owe money
+      </summary>
+
+      <div className="space-y-4 border-t border-border px-5 py-4">
         <form method="get" className="flex flex-wrap items-center gap-3">
           <input type="hidden" name="mailPreview" value="1" />
           <FilterSelect name="mailTrip" label="Scope" value={mailTripId ?? ""}>
@@ -366,20 +305,18 @@ function UnpaidMailer({
         </form>
 
         <p className="text-xs text-ink-faint">
-          Unpaid means a held spot with no payment recorded, using the same lazy expiry as the
-          table below. Holds still inside their payment window are always included. A lapsed
-          hold is past its deadline and its spot is queued for release, so asking for payment
-          may be asking for a spot the member is about to lose - it is left out unless you tick
-          the box. Trips whose results have not been released are skipped entirely: those
-          members have not been told they have a spot yet.
+          One personalised message each, with their own payment link; nobody sees anyone
+          else&apos;s address. A lapsed hold is on its way to release, so asking for payment may
+          be asking for a spot the member is about to lose - it is left out unless you tick
+          the box. Trips whose results are not out yet are skipped: those members have not
+          been told they have a spot.
         </p>
 
         {previewing ? (
           recipients.length === 0 ? (
             <Notice title="Nobody to email">
               No outstanding balances in that scope
-              {includeLapsed ? "." : ", though there may be lapsed holds. Tick the box to include them."}{" "}
-              Trips whose results are still unreleased never appear here.
+              {includeLapsed ? "." : ", though there may be lapsed holds. Tick the box to include them."}
             </Notice>
           ) : (
             <div className="space-y-3">
@@ -408,7 +345,7 @@ function UnpaidMailer({
                         <Td className="whitespace-nowrap text-ink-muted">
                           {at(row.payment_deadline_at)}
                           {row.lapsed ? (
-                            <span className="ml-2 text-xs text-alert">lapsed</span>
+                            <span className="ml-2 text-xs text-ink-faint">lapsed</span>
                           ) : null}
                         </Td>
                       </tr>
@@ -450,7 +387,7 @@ function UnpaidMailer({
           )
         ) : null}
       </div>
-    </Section>
+    </details>
   );
 }
 
@@ -465,22 +402,21 @@ function PaymentRow({
 }) {
   const state = paymentState(line, now);
   const via = paidVia(line);
-  const canRecordPayment = state === "unpaid" || state === "lapsed";
+  const owing = state === "unpaid" || state === "lapsed";
   const canReinstate = REINSTATABLE_STATES.includes(state);
   const who = `${line.first_name} ${line.last_name}`;
 
   return (
     <tr className="hover:bg-surface">
-      <Td className="whitespace-nowrap font-medium">
-        {line.first_name} {line.last_name}
+      <Td className="whitespace-nowrap">
+        <span className="font-medium">{who}</span>
+        <span className="mt-0.5 block text-xs text-ink-faint">{line.email}</span>
       </Td>
-      <Td className="whitespace-nowrap text-ink-muted">{line.email}</Td>
       <Td className="whitespace-nowrap">
         <Link href={`/admin/trips/${line.trip_id}`} className="hover:underline">
           {line.trip_title}
         </Link>
       </Td>
-      <Td className="tnum text-right">{line.spot_number ?? "-"}</Td>
       <Td className="tnum whitespace-nowrap text-right">
         {formatMoney(line.amount_cents)}
         {line.refunded_cents > 0 ? (
@@ -489,26 +425,32 @@ function PaymentRow({
           </span>
         ) : null}
       </Td>
-      <Td>
-        <Badge emphasis={badgeEmphasis(state)}>{PAYMENT_STATE_LABELS[state]}</Badge>
-      </Td>
-      <Td>
-        <span className={cn("whitespace-nowrap", via.label === "-" && "text-ink-faint")}>
-          {via.label}
-        </span>
-        {via.note ? (
-          <span className="mt-0.5 block text-xs text-ink-faint">{via.note}</span>
+      <Td className="whitespace-nowrap">
+        <Badge emphasis={state === "paid" ? "strong" : "normal"}>
+          {PAYMENT_STATE_LABELS[state]}
+        </Badge>
+        {/* The deadline is only news while money is still owed. */}
+        {owing && line.payment_deadline_at ? (
+          <span className="mt-0.5 block text-xs text-ink-faint">
+            Due {at(line.payment_deadline_at)}
+          </span>
         ) : null}
       </Td>
-      <Td className="whitespace-nowrap text-ink-muted">
-        {line.paid_at ? at(line.paid_at) : "-"}
-      </Td>
-      <Td className="whitespace-nowrap text-ink-muted">
-        {line.payment_deadline_at ? at(line.payment_deadline_at) : "-"}
+      <Td className="whitespace-nowrap">
+        {via.label === "-" ? (
+          <span className="text-ink-faint">-</span>
+        ) : (
+          <>
+            <span>{via.label}</span>
+            <span className="mt-0.5 block text-xs text-ink-faint">
+              {[via.note, line.paid_at ? at(line.paid_at) : null].filter(Boolean).join(" · ")}
+            </span>
+          </>
+        )}
       </Td>
       {mayManage ? (
         <Td>
-          {canRecordPayment ? (
+          {owing ? (
             <details className="min-w-56">
               <summary className="cursor-pointer text-xs text-accent underline underline-offset-4">
                 Record payment
@@ -603,36 +545,6 @@ function ProviderSelect({ who }: { who: string }) {
       ))}
     </select>
   );
-}
-
-/**
- * The Fusion link members are sent to. Shown in full rather than as the word
- * "link", because the treasurer's job here is to check that the link on the
- * trip is the one the Fusion portal is actually billing against.
- */
-function PaymentLink({ url }: { url: string | null }) {
-  if (!url) {
-    return <span className="text-xs text-ink-faint">Not set</span>;
-  }
-
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      title={url}
-      className="block max-w-64 truncate text-xs text-accent underline underline-offset-4"
-    >
-      {url.replace(/^https?:\/\//, "")}
-    </a>
-  );
-}
-
-/** Paid is the settled state, so it reads heaviest; everything else is plain. */
-function badgeEmphasis(state: PaymentState): "normal" | "strong" | "muted" {
-  if (state === "paid") return "strong";
-  if (state === "unpaid" || state === "lapsed") return "normal";
-  return "muted";
 }
 
 function FilterSelect({

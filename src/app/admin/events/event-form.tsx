@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { Button, Field, Input, Notice } from "@/components/ui";
+import { DateTimePicker } from "@/components/admin/date-time-picker";
 import { EVENT_KINDS, EVENT_KIND_LABELS, type ClubEventKind } from "@/lib/event-kinds";
 import type { EventFormState } from "./actions";
 
@@ -84,15 +85,10 @@ export function EventForm({
 
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Starts" hint="Mountain Time.">
-            <Input
-              type="datetime-local"
-              name="startsAt"
-              defaultValue={defaults.startsAt}
-              required
-            />
+            <DateTimePicker name="startsAt" defaultValue={defaults.startsAt} required />
           </Field>
           <Field label="Ends" hint="Mountain Time. Optional.">
-            <Input type="datetime-local" name="endsAt" defaultValue={defaults.endsAt} />
+            <DateTimePicker name="endsAt" defaultValue={defaults.endsAt} />
           </Field>
         </div>
 

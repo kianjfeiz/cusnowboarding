@@ -109,7 +109,12 @@ trip_open as (
   select t.id
     from trips t
    where t.id = $1
-     and t.status = 'open'
+     -- A scheduled trip opens ITSELF at signup_opens_at. There is deliberately
+     -- no manual "open now" step: it was a button someone had to remember to
+     -- press at 8pm, and forgetting it failed silently and totally - every
+     -- member saw "signups are not open" and nothing alerted anyone. The clock
+     -- is the authority. 'closed' still blocks, so an early manual close works.
+     and t.status in ('scheduled','open')
      and t.signup_opens_at <= now()
      and (t.signup_closes_at is null or t.signup_closes_at > now())
      and (
@@ -250,7 +255,9 @@ select
   )::int as is_club_member,
   (select count(*) from trips t
     where t.id = $1
-      and t.status = 'open'
+      -- Must mirror trip_open in the claim exactly. If these two ever disagree,
+      -- a claim that failed for one reason gets explained by another.
+      and t.status in ('scheduled','open')
       and t.signup_opens_at <= now()
       and (t.signup_closes_at is null or t.signup_closes_at > now())
   )::int as trip_open,

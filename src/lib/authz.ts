@@ -27,6 +27,7 @@ export const CAPABILITIES = [
   "manageEvents",
   "managePromotions",
   "managePayments",
+  "manageMembers",
   "manageBoard",
 ] as const;
 
@@ -53,6 +54,12 @@ const GRANTS: Record<Capability, "any" | "superadmin" | readonly RoleKey[]> = {
   manageEvents: ["events", "president", "vp"],
   managePromotions: ["travel", "president", "vp"],
   managePayments: ["treasurer", "president"],
+  /**
+   * Blocking a rider is moderation, not board administration. Gating it on
+   * superadmin meant only the president could act on a problem rider - the
+   * coordinator actually running the trip could not.
+   */
+  manageMembers: ["president", "vp", "travel"],
   manageBoard: "superadmin",
 };
 
@@ -61,8 +68,9 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   manageTrips: "Create, edit, and publish trips",
   manageEvents: "Create, edit, and publish events",
   managePromotions: "Promote from the waitlist and release holds",
-  managePayments: "Mark paid offline and issue refunds",
+  managePayments: "Record payments, dues, and email members who owe",
   manageBoard: "Manage board users and roles",
+  manageMembers: "Block a member from signing up",
 };
 
 export function can(actor: Actor | null, capability: Capability): boolean {

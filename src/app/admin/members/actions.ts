@@ -2,6 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { execute } from "@/lib/db";
+import { currentTermYear } from "@/lib/authz";
+import {
+  NEW_MEMBER_DUES_CENTS,
+  RETURNING_MEMBER_DUES_CENTS,
+  duesFor,
+  getDuesStatus,
+} from "@/lib/dues";
 import { requireCapability } from "../_lib/actor";
 import { recordAudit } from "../_lib/audit";
 
@@ -34,42 +41,19 @@ async function loadMember(memberId: string): Promise<MemberIdentity> {
 // ---------------------------------------------------------------------------
 
 /**
- * Verifying by hand is for the case the code email never arrived. Clearing
- * verification is the interesting direction: the member is still carrying a
- * signed csc_member cookie that the claim path trusts without a database read,
- * so the flag alone would not stop them. Bumping token_version is what actually
- * invalidates that cookie.
+ * Blocking bumps token_version as well as setting the flag. The member is
+ * carrying a signed csc_member cookie that the claim path trusts without a
+ * database read, so the flag on its own would not stop them claiming a spot;
+ * the version bump is what invalidates that cookie.
+ *
+ * There is no matching "unverify" control. Signing in with Google is what marks
+ * a member verified, and it is the only way in, so clearing the flag would be
+ * undone by the member's next sign-in. Blocking is the control that holds.
  */
-export async function setMemberVerified(formData: FormData): Promise<void> {
-  const actor = await requireCapability("manageBoard");
-
-  const memberId = text(formData, "memberId");
-  const verified = flag(formData, "verified");
-  const member = await loadMember(memberId);
-
-  await execute(
-    `update members
-        set email_verified_at = case when $2 then coalesce(email_verified_at, now()) else null end,
-            token_version = case when $2 then token_version else token_version + 1 end,
-            updated_at = now()
-      where id = $1`,
-    [memberId, verified],
-  );
-
-  await recordAudit({
-    actorBoardUserId: actor.boardUserId,
-    action: verified ? "member.verify" : "member.unverify",
-    entityType: "member",
-    entityId: memberId,
-    data: { email: member.email },
-  });
-
-  refreshMembers();
-}
-
-/** Same reasoning as clearing verification: a block that leaves a live cookie in place is not a block. */
 export async function setMemberBlocked(formData: FormData): Promise<void> {
-  const actor = await requireCapability("manageBoard");
+  // Moderation, not board administration - the coordinator running the trip
+  // needs this on a Friday night, not just the president.
+  const actor = await requireCapability("manageMembers");
 
   const memberId = text(formData, "memberId");
   const blocked = flag(formData, "blocked");
@@ -95,24 +79,65 @@ export async function setMemberBlocked(formData: FormData): Promise<void> {
   refreshMembers();
 }
 
+/**
+ * Records or clears dues for the CURRENT season.
+ *
+ * Two writes, deliberately: `members.is_club_member` is the fast flag the claim
+ * statement reads, and `member_dues` is the history that decides whether this
+ * person pays the returning rate next year. Setting only the flag would work
+ * today and quietly overcharge them next season.
+ *
+ * Clearing removes only the current season's row. Earlier seasons are what make
+ * someone a returning member, and undoing a misclick must not erase that.
+ */
 export async function setMemberDues(formData: FormData): Promise<void> {
   const actor = await requireCapability("managePayments");
 
   const memberId = text(formData, "memberId");
   const paid = flag(formData, "paid");
   const member = await loadMember(memberId);
+  const season = currentTermYear();
+
+  // Read before writing so the rate reflects prior seasons, not this one.
+  const status = await getDuesStatus(memberId);
 
   await execute(
     `update members set is_club_member = $2, updated_at = now() where id = $1`,
     [memberId, paid],
   );
 
+  if (paid) {
+    await execute(
+      `insert into member_dues (member_id, term_year, amount_cents, provider, note, recorded_by)
+       values ($1, $2, $3, $4, $5, $6)
+       on conflict (member_id, term_year) do nothing`,
+      [
+        memberId,
+        season,
+        duesFor(status.returning),
+        text(formData, "provider") || "fusion",
+        text(formData, "note") || null,
+        actor.boardUserId,
+      ],
+    );
+  } else {
+    await execute(`delete from member_dues where member_id = $1 and term_year = $2`, [
+      memberId,
+      season,
+    ]);
+  }
+
   await recordAudit({
     actorBoardUserId: actor.boardUserId,
     action: paid ? "member.dues.mark" : "member.dues.clear",
     entityType: "member",
     entityId: memberId,
-    data: { email: member.email },
+    data: {
+      email: member.email,
+      termYear: season,
+      amountCents: paid ? duesFor(status.returning) : null,
+      returning: status.returning,
+    },
   });
 
   refreshMembers();
@@ -168,6 +193,13 @@ export async function importDues(
 
   // `matched` reads the pre-update snapshot, so was_member distinguishes rows
   // this import actually changed from rows that were already marked.
+  /**
+   * One statement so the flag and the season row cannot diverge. The rate is
+   * decided per member from whether they have a row in an EARLIER season - the
+   * same rule as the single-member path, applied in SQL so a 300-row import
+   * does not become 300 round trips.
+   */
+  const season = currentTermYear();
   const matched = await execute<{ email: string; was_member: boolean }>(
     `with matched as (
        select id, email::text as email, is_club_member as was_member
@@ -178,9 +210,28 @@ export async function importDues(
        update members
           set is_club_member = true, updated_at = now()
         where id in (select id from matched) and not is_club_member
+     ),
+     recorded as (
+       insert into member_dues (member_id, term_year, amount_cents, provider, recorded_by)
+       select m.id,
+              $2::int,
+              case when exists (
+                     select 1 from member_dues d
+                      where d.member_id = m.id and d.term_year < $2::int
+                   ) then $3::int else $4::int end,
+              'fusion',
+              $5::uuid
+         from matched m
+       on conflict (member_id, term_year) do nothing
      )
      select email, was_member from matched`,
-    [emails],
+    [
+      emails,
+      season,
+      RETURNING_MEMBER_DUES_CENTS,
+      NEW_MEMBER_DUES_CENTS,
+      actor.boardUserId,
+    ],
   );
 
   const found = new Set(matched.map((row) => row.email.toLowerCase()));

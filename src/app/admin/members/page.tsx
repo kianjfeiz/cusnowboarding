@@ -1,17 +1,24 @@
 import Link from "next/link";
 import { EmptyRow, PageHeader, Section, TableWrap, Td, Th } from "@/components/admin/shell";
 import { SubmitButton } from "@/components/admin/submit-button";
-import { Badge, Button, Input, formatDenver } from "@/components/ui";
+import { Badge, Button, Input, formatMoney } from "@/components/ui";
 import { can } from "@/lib/authz";
+import { getDuesStatusFor } from "@/lib/dues";
 import { requireCapability } from "../_lib/actor";
 import { listMembers } from "../_lib/queries";
-import { setMemberBlocked, setMemberDues, setMemberVerified } from "./actions";
+import { setMemberBlocked, setMemberDues } from "./actions";
 import { DuesImport } from "./dues-import";
 
 export const dynamic = "force-dynamic";
 
 const LIMIT = 100;
 
+/**
+ * Four jobs: find a person, see whether their dues are recorded, keep someone
+ * out, and import dues in bulk. Anything else about a member - what they are
+ * signed up for, how to reach them on the day - belongs on the trip they are on,
+ * which is where anyone would look for it.
+ */
 export default async function MembersPage({
   searchParams,
 }: {
@@ -22,16 +29,18 @@ export default async function MembersPage({
   const { q } = await searchParams;
   const search = (q ?? "").trim();
   const members = await listMembers(search, LIMIT);
+  // One query for the page rather than one per row.
+  const dues = await getDuesStatusFor(members.map((m) => m.id));
 
-  const mayManageBoard = can(actor, "manageBoard");
+  const mayBlock = can(actor, "manageMembers");
   const mayManagePayments = can(actor, "managePayments");
-  const showActions = mayManageBoard || mayManagePayments;
+  const showActions = mayBlock || mayManagePayments;
 
   return (
     <>
       <PageHeader
         title="Members"
-        subtitle="Everyone who has given the club an email address. Members are created by signing up, not here."
+        subtitle="Everyone who has signed in. Members are created by signing in with Google, not here."
       />
 
       <Section
@@ -73,18 +82,13 @@ export default async function MembersPage({
             <thead className="border-b border-border">
               <tr>
                 <Th>Member</Th>
-                <Th>Phone</Th>
-                <Th>Verified</Th>
                 <Th>Dues</Th>
-                <Th>Access</Th>
-                <Th className="text-right">Signups</Th>
-                <Th className="text-right">Paid</Th>
                 {showActions ? <Th /> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {members.length === 0 ? (
-                <EmptyRow colSpan={showActions ? 8 : 7}>
+                <EmptyRow colSpan={showActions ? 3 : 2}>
                   {search ? "No member matches that search." : "No members yet."}
                 </EmptyRow>
               ) : (
@@ -94,40 +98,39 @@ export default async function MembersPage({
                       <span className="font-medium">
                         {member.first_name} {member.last_name}
                       </span>
+                      {member.is_blocked ? (
+                        <span className="ml-2">
+                          <Badge emphasis="strong">Blocked</Badge>
+                        </span>
+                      ) : null}
                       <span className="mt-0.5 block text-xs text-ink-faint">
                         {member.email}
                       </span>
                     </Td>
-                    <Td className="tnum whitespace-nowrap text-ink-muted">
-                      {member.phone ?? "-"}
-                    </Td>
-                    <Td>
-                      {member.email_verified_at ? (
-                        <span title={`Verified ${formatDenver(member.email_verified_at)}`}>
-                          <Badge emphasis="muted">Verified</Badge>
-                        </span>
-                      ) : (
-                        <Badge>Not verified</Badge>
-                      )}
-                    </Td>
                     <Td>
                       {member.is_club_member ? (
-                        <Badge emphasis="muted">Dues paid</Badge>
+                        <Badge emphasis="muted">Paid</Badge>
                       ) : (
-                        <Badge>No dues</Badge>
+                        <Badge>Not paid</Badge>
                       )}
+                      {/*
+                        The rate, not just the state. Returning members pay half,
+                        and the treasurer has no other way to know which someone
+                        is - it depends on a season that may predate them.
+                      */}
+                      <span className="mt-0.5 block text-xs text-ink-faint">
+                        {(() => {
+                          const status = dues.get(member.id);
+                          if (!status) return null;
+                          if (status.paidThisSeason) {
+                            return status.returning ? "Returning" : "First season";
+                          }
+                          return `Owes ${formatMoney(status.owedCents)} · ${
+                            status.returning ? "returning rate" : "first-season rate"
+                          }`;
+                        })()}
+                      </span>
                     </Td>
-                    <Td>
-                      {member.is_blocked ? (
-                        <Badge emphasis="strong">Blocked</Badge>
-                      ) : (
-                        <Badge emphasis="muted">Allowed</Badge>
-                      )}
-                    </Td>
-                    <Td className="tnum text-right text-ink-muted">
-                      <span title={member.trip_titles ?? undefined}>{member.trip_count}</span>
-                    </Td>
-                    <Td className="tnum text-right text-ink-muted">{member.paid_count}</Td>
                     {showActions ? (
                       <Td>
                         <div className="flex flex-wrap justify-end gap-2">
@@ -145,28 +148,7 @@ export default async function MembersPage({
                             </form>
                           ) : null}
 
-                          {mayManageBoard ? (
-                            <form action={setMemberVerified}>
-                              <input type="hidden" name="memberId" value={member.id} />
-                              <input
-                                type="hidden"
-                                name="verified"
-                                value={member.email_verified_at ? "false" : "true"}
-                              />
-                              <SubmitButton
-                                variant={member.email_verified_at ? "danger" : "secondary"}
-                                confirm={
-                                  member.email_verified_at
-                                    ? `Clear verification for ${member.email}? They will be signed out and have to verify again before claiming a spot.`
-                                    : undefined
-                                }
-                              >
-                                {member.email_verified_at ? "Unverify" : "Mark verified"}
-                              </SubmitButton>
-                            </form>
-                          ) : null}
-
-                          {mayManageBoard ? (
+                          {mayBlock ? (
                             <form action={setMemberBlocked}>
                               <input type="hidden" name="memberId" value={member.id} />
                               <input

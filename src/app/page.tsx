@@ -7,6 +7,29 @@ import { SiteHeader } from "@/components/site-header";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * A scheduled trip opens itself the moment its clock arrives, so "scheduled"
+ * no longer means "not yet claimable" - the time does. Reading the status alone
+ * would tell a member signups open at 8pm while the button beside it is already
+ * live.
+ */
+function signupLabel(trip: {
+  status: string;
+  signupOpensAt: Date;
+  signupClosesAt: Date | null;
+}): string {
+  if (trip.status === "closed") return "Signups closed";
+
+  const now = Date.now();
+  if (trip.signupOpensAt.getTime() > now) {
+    return `Signups open ${formatDenver(trip.signupOpensAt)}`;
+  }
+  if (trip.signupClosesAt && trip.signupClosesAt.getTime() <= now) {
+    return "Signups closed";
+  }
+  return "Signups open now";
+}
+
 export default async function Home() {
   const upcoming = await db
     .select()
@@ -39,13 +62,7 @@ export default async function Home() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="font-medium text-ink">{trip.title}</p>
-                    <p className="mt-1 text-sm text-ink-muted">
-                      {trip.status === "open"
-                        ? "Signups open now"
-                        : trip.status === "scheduled"
-                          ? `Signups open ${formatDenver(trip.signupOpensAt)}`
-                          : "Signups closed"}
-                    </p>
+                    <p className="mt-1 text-sm text-ink-muted">{signupLabel(trip)}</p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-2">
                     <Badge emphasis="strong">{formatMoney(trip.priceCents)}</Badge>

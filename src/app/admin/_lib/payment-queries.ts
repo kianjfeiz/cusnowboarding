@@ -71,16 +71,20 @@ export function paymentState(row: StatefulRow, now: number = Date.now()): Paymen
 // Filters
 // ---------------------------------------------------------------------------
 
-export const PAYMENT_FILTERS = ["all", "paid", "unpaid", "lapsed", "refunded"] as const;
+/**
+ * Three, because there are only three questions. "Owing" deliberately spans
+ * both unpaid and lapsed: a lapsed hold is still a member who has not paid, and
+ * splitting them meant a filter called Unpaid that hid people who owed money.
+ * Which of the two a row is stays visible in its status word.
+ */
+export const PAYMENT_FILTERS = ["owing", "paid", "all"] as const;
 
 export type PaymentFilter = (typeof PAYMENT_FILTERS)[number];
 
 export const PAYMENT_FILTER_LABELS: Record<PaymentFilter, string> = {
-  all: "All",
+  owing: "Owing",
   paid: "Paid",
-  unpaid: "Unpaid",
-  lapsed: "Lapsed",
-  refunded: "Refunded",
+  all: "Everyone",
 };
 
 export function parsePaymentFilter(raw: string | null | undefined): PaymentFilter {
@@ -226,7 +230,9 @@ export function matchesPaymentFilter(
   now: number,
 ): boolean {
   if (filter === "all") return true;
-  return paymentState(row, now) === filter;
+  const state = paymentState(row, now);
+  if (filter === "owing") return state === "unpaid" || state === "lapsed";
+  return state === "paid";
 }
 
 /**
@@ -268,8 +274,6 @@ export type PaymentTotals = {
   /** Owed by everyone currently allocated a spot, paid or not. */
   expected_cents: number;
   collected_cents: number;
-  refunded_cents: number;
-  allocated_count: number;
   paid_count: number;
   unpaid_count: number;
   lapsed_count: number;
@@ -282,17 +286,11 @@ export async function getPaymentTotals(): Promise<PaymentTotals> {
          as expected_cents,
        coalesce(sum(s.amount_cents) filter (where s.status = 'paid'), 0)::int
          as collected_cents,
-       count(*) filter (where s.status in ('held', 'paid'))::int as allocated_count,
        count(*) filter (where s.status = 'paid')::int as paid_count,
        count(*) filter (where s.status = 'held' and s.payment_deadline_at > now())::int
          as unpaid_count,
        count(*) filter (where s.status = 'held' and s.payment_deadline_at <= now())::int
-         as lapsed_count,
-       (select coalesce(sum(p.refunded_cents), 0)::int
-          from payments p
-          join signups ps on ps.id = p.signup_id
-          join trips pt on pt.id = ps.trip_id
-         where pt.status in ${LIVE_TRIP_STATUSES}) as refunded_cents
+         as lapsed_count
      from signups s
      join trips t on t.id = s.trip_id
      where t.status in ${LIVE_TRIP_STATUSES}`,
@@ -302,8 +300,6 @@ export async function getPaymentTotals(): Promise<PaymentTotals> {
     rows[0] ?? {
       expected_cents: 0,
       collected_cents: 0,
-      refunded_cents: 0,
-      allocated_count: 0,
       paid_count: 0,
       unpaid_count: 0,
       lapsed_count: 0,
@@ -319,54 +315,27 @@ export function outstandingCents(totals: {
 }
 
 // ---------------------------------------------------------------------------
-// Per-trip breakdown
+// Live trips
 // ---------------------------------------------------------------------------
 
-export type TripPaymentTotals = {
-  trip_id: string;
-  slug: string;
+export type LiveTrip = {
+  id: string;
   title: string;
-  trip_status: TripStatus;
-  capacity: number;
-  depart_at: Date;
   /** Where members are sent to pay. Null until the board sets one. */
   payment_url: string | null;
-  /** paid + holds still inside their window, the same "taken" the roster shows. */
-  spots_filled: number;
-  expected_cents: number;
-  collected_cents: number;
-  paid_count: number;
-  unpaid_count: number;
-  lapsed_count: number;
 };
 
-export async function listTripPaymentTotals(): Promise<TripPaymentTotals[]> {
-  return execute<TripPaymentTotals>(
-    `select t.id as trip_id, t.slug, t.title, t.status::text as trip_status,
-            t.capacity, t.depart_at, t.payment_url,
-            c.spots_filled, c.expected_cents, c.collected_cents,
-            c.paid_count, c.unpaid_count, c.lapsed_count
-       from trips t
-       left join lateral (
-         select
-           count(*) filter (
-             where s.status = 'paid'
-                or (s.status = 'held' and s.payment_deadline_at > now())
-           )::int as spots_filled,
-           coalesce(sum(s.amount_cents) filter (where s.status in ('held', 'paid')), 0)::int
-             as expected_cents,
-           coalesce(sum(s.amount_cents) filter (where s.status = 'paid'), 0)::int
-             as collected_cents,
-           count(*) filter (where s.status = 'paid')::int as paid_count,
-           count(*) filter (where s.status = 'held' and s.payment_deadline_at > now())::int
-             as unpaid_count,
-           count(*) filter (where s.status = 'held' and s.payment_deadline_at <= now())::int
-             as lapsed_count
-         from signups s
-         where s.trip_id = t.id
-       ) c on true
-      where t.status in ${LIVE_TRIP_STATUSES}
-      order by t.depart_at`,
+/**
+ * Scope for the reminder batch, and the only per-trip fact worth a treasurer's
+ * attention: a live trip with no payment link is one whose members have nowhere
+ * to pay. The rest of the per-trip money is on the trip itself.
+ */
+export async function listLiveTrips(): Promise<LiveTrip[]> {
+  return execute<LiveTrip>(
+    `select id, title, payment_url
+       from trips
+      where status in ${LIVE_TRIP_STATUSES}
+      order by depart_at`,
   );
 }
 

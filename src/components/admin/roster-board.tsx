@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition, type DragEvent } from "react";
+import { useMemo, useState, useTransition, type DragEvent, type ReactNode } from "react";
 import { Badge, Button, Notice, cn } from "@/components/ui";
 
 /**
@@ -48,6 +48,7 @@ export function RosterBoard({
   initialOnTrip,
   initialWaitlisted,
   save,
+  sendAction,
 }: {
   tripId: string;
   capacity: number;
@@ -59,6 +60,14 @@ export function RosterBoard({
     onTrip: string[],
     waitlisted: string[],
   ) => Promise<RosterSaveResult>;
+  /**
+   * The "Send results" form, rendered here rather than at the top of the page so
+   * that curating and publishing are one motion. It appears only once the list
+   * on screen matches the list on the server: publishing an arrangement the
+   * board can see but has not saved is the one mistake on this screen that
+   * cannot be taken back.
+   */
+  sendAction?: ReactNode;
 }) {
   const byId = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
 
@@ -309,22 +318,30 @@ export function RosterBoard({
         <p className="text-sm text-ink-muted">
           {dirty
             ? "Unsaved changes. Nothing has been written and nobody has been told anything."
-            : "No changes since the last save."}
+            : sendAction
+              ? "The list is saved. Nobody has been told anything yet."
+              : "No changes since the last save."}
         </p>
         <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setLists(baseline);
-              announce("Changes discarded.");
-            }}
-            disabled={!dirty || pending}
-          >
-            Reset
-          </Button>
-          <Button onClick={onSave} disabled={!dirty || pending || over > 0}>
-            {pending ? "Saving" : "Save order"}
-          </Button>
+          {dirty ? (
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setLists(baseline);
+                  announce("Changes discarded.");
+                }}
+                disabled={pending}
+              >
+                Reset
+              </Button>
+              <Button onClick={onSave} disabled={pending || over > 0}>
+                {pending ? "Saving" : "Save order"}
+              </Button>
+            </>
+          ) : (
+            sendAction
+          )}
         </div>
       </div>
 

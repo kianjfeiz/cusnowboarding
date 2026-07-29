@@ -157,6 +157,44 @@ export const members = pgTable(
   ],
 );
 
+/**
+ * One row per member per season that they paid dues for.
+ *
+ * `members.is_club_member` stays the fast flag for THIS season - it is what the
+ * claim statement reads, and that path must not grow a join. This table is the
+ * history behind it, and it exists for one reason: dues are cheaper for someone
+ * who paid in a previous year, so "have they ever paid before" has to be a fact
+ * the system holds rather than something the treasurer remembers.
+ *
+ * Recording dues writes here AND sets the flag; a new season starts with the
+ * flag cleared and the history intact.
+ */
+export const memberDues = pgTable(
+  "member_dues",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => members.id, { onDelete: "cascade" }),
+    /** 2026 means the 2026-27 season, matching board_user_roles.term_year. */
+    termYear: integer("term_year").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    /** fusion | venmo | cash | check | other */
+    provider: text("provider").notNull().default("fusion"),
+    reference: text("reference"),
+    note: text("note"),
+    recordedBy: uuid("recorded_by").references(() => boardUsers.id),
+    paidAt: timestamptz("paid_at").notNull().defaultNow(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    /** Dues are paid once a season. Recording twice is a mistake, not a top-up. */
+    uniqueIndex("member_dues_one_per_season").on(t.memberId, t.termYear),
+    index("member_dues_member_idx").on(t.memberId, t.termYear.desc()),
+    check("member_dues_amount_nonneg", sql`${t.amountCents} >= 0`),
+  ],
+);
+
 export const emailVerifications = pgTable(
   "email_verifications",
   {

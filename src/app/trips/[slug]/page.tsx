@@ -137,7 +137,10 @@ export default async function TripPage({ params }: { params: Promise<{ slug: str
           signupClosesAtMs={trip.signupClosesAt?.getTime() ?? null}
           armed={member !== null}
           priceCents={trip.priceCents}
-          isOpenStatus={trip.status === "open"}
+          // A scheduled trip opens itself at signup_opens_at, so the status only
+          // has to say the board has not closed or cancelled it. The countdown
+          // decides the rest, and the claim re-checks the clock server-side.
+          isOpenStatus={trip.status === "scheduled" || trip.status === "open"}
           // Issued at render so that at 8:00:00 the client already holds it and
           // entering costs no extra round trip.
           challenge={member ? await issueChallenge(trip.id, member.id) : null}

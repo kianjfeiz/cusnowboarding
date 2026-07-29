@@ -14,18 +14,25 @@ function termLabel(year: number): string {
   return `${year}-${String((year + 1) % 100).padStart(2, "0")}`;
 }
 
-function groupRolesByTerm(roles: BoardUserRow["roles"]): Array<[number, string[]]> {
-  const byTerm = new Map<number, string[]>();
+/**
+ * Roles are stored per term year, but the board never has to think in those
+ * terms: last season's roles stop granting anything on their own, so the screen
+ * shows only the ones in force and assigns to the current season. One row per
+ * role key, keeping the earliest term still in force, because that is the row
+ * doing the granting.
+ */
+function rolesInForce(
+  roles: BoardUserRow["roles"],
+  thisTerm: number,
+): Array<{ key: string; termYear: number }> {
+  const held = new Map<string, number>();
   for (const role of roles) {
-    const bucket = byTerm.get(role.termYear);
-    if (bucket) bucket.push(role.key);
-    else byTerm.set(role.termYear, [role.key]);
+    if (role.termYear < thisTerm) continue;
+    const existing = held.get(role.key);
+    if (existing === undefined || role.termYear < existing) held.set(role.key, role.termYear);
   }
-  return [...byTerm.entries()].sort((a, b) => b[0] - a[0]);
+  return [...held.entries()].map(([key, termYear]) => ({ key, termYear }));
 }
-
-const controlClass =
-  "h-8 rounded-md border border-border bg-paper px-2 text-xs text-ink focus:border-accent focus:outline-none";
 
 export default async function SettingsPage() {
   const actor = await requireActor();
@@ -33,10 +40,10 @@ export default async function SettingsPage() {
   if (!can(actor, "manageBoard")) {
     return (
       <>
-        <PageHeader title="Settings" subtitle="Board users and role assignments." />
+        <PageHeader title="Settings" subtitle="Who can sign in to the board tool." />
         <Notice tone="alert" title="Not permitted">
-          Only a superadmin can add board users or change role assignments. Ask the
-          president if you need something changed here.
+          Only a superadmin can add board users or change roles. Ask the president if you
+          need something changed here.
         </Notice>
       </>
     );
@@ -51,16 +58,13 @@ export default async function SettingsPage() {
     <>
       <PageHeader
         title="Settings"
-        subtitle={`Board users and role assignments. Roles are scoped to a term year; ${termLabel(thisTerm)} is the one that grants anything today.`}
+        subtitle={`Who can sign in to the board tool, and what each of them can do. Roles below are for the ${termLabel(thisTerm)} season; older ones have already stopped granting anything.`}
       />
 
-      <Section
-        title={`${users.length} board users`}
-        description="Removing someone takes effect on their next page load, not at token expiry."
-      >
+      <Section title={`${users.length} board users`}>
         <ul className="divide-y divide-border">
           {users.map((user) => {
-            const grouped = groupRolesByTerm(user.roles);
+            const held = rolesInForce(user.roles, thisTerm);
             const isLastSuperadmin =
               user.is_active && user.is_superadmin && activeSuperadmins === 1;
 
@@ -110,48 +114,39 @@ export default async function SettingsPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 space-y-1.5">
-                  {grouped.length === 0 ? (
-                    <p className="text-xs text-ink-faint">No roles assigned.</p>
+                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+                  {held.length === 0 ? (
+                    <span className="text-xs text-ink-faint">No role this season.</span>
                   ) : (
-                    grouped.map(([year, keys]) => (
-                      <div key={year} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                        <span className="tnum w-16 shrink-0 text-xs text-ink-faint">
-                          {termLabel(year)}
-                        </span>
-                        {keys.map((key) => (
-                          <span key={key} className="inline-flex items-center gap-1">
-                            <Badge emphasis={year >= thisTerm ? "normal" : "muted"}>
-                              {roleLabels.get(key) ?? key}
-                            </Badge>
-                            <form action={removeRole}>
-                              <input type="hidden" name="boardUserId" value={user.id} />
-                              <input type="hidden" name="roleKey" value={key} />
-                              <input type="hidden" name="termYear" value={year} />
-                              <SubmitButton
-                                variant="quiet"
-                                className="h-6 px-1.5"
-                                confirm={`Remove ${roleLabels.get(key) ?? key} (${termLabel(year)}) from ${user.email}?`}
-                              >
-                                Remove
-                              </SubmitButton>
-                            </form>
-                          </span>
-                        ))}
-                      </div>
+                    held.map(({ key, termYear }) => (
+                      <span key={key} className="inline-flex items-center gap-1">
+                        <Badge>{roleLabels.get(key) ?? key}</Badge>
+                        <form action={removeRole}>
+                          <input type="hidden" name="boardUserId" value={user.id} />
+                          <input type="hidden" name="roleKey" value={key} />
+                          <input type="hidden" name="termYear" value={termYear} />
+                          <SubmitButton
+                            variant="quiet"
+                            className="h-6 px-1.5"
+                            confirm={`Remove ${roleLabels.get(key) ?? key} from ${user.email}?`}
+                          >
+                            Remove
+                          </SubmitButton>
+                        </form>
+                      </span>
                     ))
                   )}
 
                   {user.is_active ? (
-                    <form
-                      action={assignRole}
-                      className="flex flex-wrap items-center gap-2 pt-1"
-                    >
+                    <form action={assignRole} className="flex items-center gap-2">
                       <input type="hidden" name="boardUserId" value={user.id} />
+                      {/* Always this season. A board that had to pick a year would
+                          eventually pick the wrong one and wonder why nothing worked. */}
+                      <input type="hidden" name="termYear" value={thisTerm} />
                       <select
                         name="roleKey"
                         aria-label={`Role for ${user.email}`}
-                        className={controlClass}
+                        className="h-8 rounded-md border border-border bg-paper px-2 text-xs text-ink focus:border-accent focus:outline-none"
                         defaultValue={roles[0]?.key}
                       >
                         {roles.map((role) => (
@@ -160,17 +155,7 @@ export default async function SettingsPage() {
                           </option>
                         ))}
                       </select>
-                      <input
-                        type="number"
-                        name="termYear"
-                        aria-label={`Term year for ${user.email}`}
-                        defaultValue={thisTerm}
-                        min={2015}
-                        max={thisTerm + 5}
-                        step={1}
-                        className={`${controlClass} tnum w-24`}
-                      />
-                      <SubmitButton>Assign role</SubmitButton>
+                      <SubmitButton>Add role</SubmitButton>
                     </form>
                   ) : null}
                 </div>
