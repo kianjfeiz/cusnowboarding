@@ -17,6 +17,10 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
+  // Anchors the relative URLs Next generates for canonical and og: tags. Without
+  // it a deployed build falls back to localhost, which is only visible once a
+  // link is pasted somewhere that unfurls it.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000"),
   title: "CU Snowboarding",
   description: "Trip signups and payments for the CU Boulder snowboarding team.",
   // The site is shared by link within the team, not published.

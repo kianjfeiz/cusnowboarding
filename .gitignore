@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# one-off local scripts (see the deploy checklist in the README)
+/.tmp-*

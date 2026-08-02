@@ -173,7 +173,11 @@ Set up, in the Cloudflare dashboard:
    ```json
    [
      {
-       "AllowedOrigins": ["http://localhost:3000", "https://YOUR-DOMAIN"],
+       "AllowedOrigins": [
+         "https://cusnowboarding.com",
+         "https://www.cusnowboarding.com",
+         "http://localhost:3000"
+       ],
        "AllowedMethods": ["PUT"],
        "AllowedHeaders": ["content-type"],
        "MaxAgeSeconds": 3600
@@ -234,9 +238,39 @@ Then sign in with that Google account and add the rest of the board in
 Settings. `board:bootstrap` is idempotent and is the only script meant to touch
 production; it writes the role catalogue and one board user and nothing else.
 
-Google OAuth needs the deployed origin registered: `https://your-domain` as an
-authorized JavaScript origin, and `https://your-domain/api/auth/callback/google`
-as an authorized redirect URI. Set `NEXT_PUBLIC_BASE_URL` to the same origin.
+### Production settings for cusnowboarding.com
+
+**Google OAuth** (Cloud Console, the same client used locally):
+
+| Field | Value |
+| --- | --- |
+| Authorized JavaScript origin | `https://cusnowboarding.com` |
+| Authorized redirect URI | `https://cusnowboarding.com/api/auth/callback/google` |
+
+Keep the `http://localhost:3000` pair alongside them so development still works.
+Google matches redirect URIs character for character - a trailing slash breaks
+it - and origins must carry no path.
+
+**R2 CORS**: `docs/r2-cors.json` is the policy to paste into the bucket's
+settings. It only governs uploads; reads are signed URLs in `<img src>`, which
+the browser does not treat as a cross-origin fetch.
+
+**Environment**, set in Vercel for Production:
+
+| Variable | Value |
+| --- | --- |
+| `NEXT_PUBLIC_BASE_URL` | `https://cusnowboarding.com` |
+| `DATABASE_URL` | Neon **pooled** connection string |
+| `DIRECT_DATABASE_URL` | Neon **direct** connection string |
+| `AUTH_SECRET`, `MEMBER_JWT_SECRET`, `VERIFY_PEPPER`, `CRON_SECRET` | fresh `openssl rand -base64 32` each - do not reuse the local ones |
+| `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | same client as local |
+| `RESEND_API_KEY`, `EMAIL_FROM` | `EMAIL_FROM` must use a domain verified in Resend |
+| `R2_*` | same bucket as local |
+| `UPSTASH_*` | optional, but see the rate-limiting note below |
+
+`NEXT_PUBLIC_BASE_URL` is baked in at build time, so changing it needs a
+redeploy, not just a restart. It is what every email link is built from: get it
+wrong and the pay links in members' inboxes point at the wrong host.
 
 ### Running it
 
