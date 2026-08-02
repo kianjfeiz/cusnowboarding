@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { NavStrip, type NavItem } from "@/components/nav-strip";
+import { Wordmark } from "@/components/wordmark";
 import { can } from "@/lib/authz";
 import { requireActor } from "./_lib/actor";
 import { signOutAction } from "./_lib/session-actions";
@@ -29,8 +30,17 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3">
           {/* Same hit-area trick as the member header: taller to the finger,
               unchanged to the layout. */}
-          <Link href="/admin" className="-my-2 py-2 text-sm font-semibold tracking-tight">
-            CU Snowboarding board
+          <Link
+            href="/admin"
+            className="-my-2 flex items-center gap-2 py-2 text-ink"
+            aria-label="CU Snowboarding board home"
+          >
+            <Wordmark />
+            {/* The drawn mark says the club; this says which half of it you are
+                in, which is the part a board member needs at a glance. */}
+            <span aria-hidden className="text-sm font-semibold tracking-tight text-ink-muted">
+              board
+            </span>
           </Link>
 
           {/* The same glass strip as the member site, so moving between the

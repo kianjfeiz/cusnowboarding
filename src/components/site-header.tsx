@@ -2,6 +2,7 @@ import Link from "next/link";
 import { auth, signIn, signOut } from "@/auth";
 import { Avatar } from "@/components/avatar";
 import { NavStrip, type NavItem } from "@/components/nav-strip";
+import { Wordmark } from "@/components/wordmark";
 
 /**
  * Member-facing navigation. The board has its own shell under /admin; this is
@@ -35,8 +36,8 @@ export async function SiteHeader() {
       <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3">
         {/* `-my-2 py-2` buys the wordmark a finger-sized hit area without
             adding any height to the header row. */}
-        <Link href="/" className="-my-2 py-2 text-sm font-semibold tracking-tight">
-          CU Snowboarding
+        <Link href="/" className="-my-2 py-2 text-ink" aria-label="CU Snowboarding home">
+          <Wordmark />
         </Link>
 
         {/* Same reasoning as the board header: the strip scrolls, not the page. */}
