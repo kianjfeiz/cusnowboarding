@@ -58,7 +58,13 @@ export const env = createEnv({
   runtimeEnv: {
     NODE_ENV: process.env.NODE_ENV,
     DATABASE_URL: process.env.DATABASE_URL,
-    DIRECT_DATABASE_URL: process.env.DIRECT_DATABASE_URL,
+    /*
+      `DATABASE_URL_UNPOOLED` is what Neon's Vercel integration injects for the
+      direct connection. Accepting it means a database provisioned from the
+      Vercel dashboard needs no hand-copied variables at all, which is the
+      whole point of provisioning it there.
+    */
+    DIRECT_DATABASE_URL: process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL_UNPOOLED,
     MEMBER_JWT_SECRET: process.env.MEMBER_JWT_SECRET,
     VERIFY_PEPPER: process.env.VERIFY_PEPPER,
     AUTH_SECRET: process.env.AUTH_SECRET,

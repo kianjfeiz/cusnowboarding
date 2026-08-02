@@ -274,10 +274,21 @@ wrong and the pay links in members' inboxes point at the wrong host.
 
 ### Running it
 
-- **Region co-location is not optional.** The claim route pins
-  `preferredRegion = "iad1"`; the database must be in the same region. A
-  cross-region function pays its round trip *while holding the trip row lock*,
-  which turns a 100-person burst into a multi-second tail.
+- **Co-locate the database with the functions.** The claim route pins
+  `preferredRegion = "iad1"`, which is physically AWS `us-east-1` - so "put the
+  database in us-east-1" means "put it next to the functions", not "use AWS".
+
+  Worth being precise about what distance costs, because it is not the same on
+  every path. The claim is a *single* statement, so its round trip happens
+  before and after the trip row lock, never during it: every claimer pays the
+  latency once, in parallel, and contention does not multiply it. The board
+  transactions are the opposite case - `withTripLock` holds the lock across a
+  `begin`, a `select ... for update`, the work, and a `commit`, so there every
+  extra millisecond is paid once per statement *and* held against whoever is
+  waiting.
+
+  So cross-region is a flat tax on the drop and a multiplied one on board
+  actions. Neither is catastrophic; both are free to avoid.
 - **Vercel Hobby caps crons at once per day**, which is not enough for the
   15-minute hold-expiry job. Use Pro, or trigger `/api/cron/*` from an external
   scheduler. All cron routes require `Authorization: Bearer $CRON_SECRET`.
