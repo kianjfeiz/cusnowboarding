@@ -120,7 +120,13 @@ verification codes and all other mail are printed to the server log rather than
 sent, so the full flow works offline.
 
 The seed creates two trips (one open, one scheduled), 200 verified members, the
-seven board roles, and one superadmin board user.
+seven board roles, and one superadmin board user. It refuses to run against a
+non-local database - see `board:bootstrap` under Deployment for the production
+equivalent.
+
+Sign-in is Google only, in every environment. There is no local bypass on
+purpose: a second route to a session is a second route to get wrong, and it
+means development exercises exactly what members do.
 
 **The app always talks to PgBouncer in transaction mode**, matching Neon in
 production. Migrations and seeding use the direct connection. Testing through
@@ -213,6 +219,27 @@ waitlist promotions competing for one spot.
 
 ## Deployment notes
 
+### First deploy
+
+The admin is gated on the `board_users` table, and the only way to add someone
+to it through the UI is from inside the admin - so a fresh database has nobody
+who can let anyone in. Break that loop once, from a laptop:
+
+```bash
+npm run db:migrate                                          # DIRECT_DATABASE_URL
+npm run board:bootstrap -- president@colorado.edu "Name"    # one superadmin
+```
+
+Then sign in with that Google account and add the rest of the board in
+Settings. `board:bootstrap` is idempotent and is the only script meant to touch
+production; it writes the role catalogue and one board user and nothing else.
+
+Google OAuth needs the deployed origin registered: `https://your-domain` as an
+authorized JavaScript origin, and `https://your-domain/api/auth/callback/google`
+as an authorized redirect URI. Set `NEXT_PUBLIC_BASE_URL` to the same origin.
+
+### Running it
+
 - **Region co-location is not optional.** The claim route pins
   `preferredRegion = "iad1"`; the database must be in the same region. A
   cross-region function pays its round trip *while holding the trip row lock*,
@@ -234,7 +261,7 @@ waitlist promotions competing for one spot.
 ## Not in V1
 
 Member accounts and portal, board task tracking for the seven roles, merch
-orders, gear rental, carpools, rooming, refund self-service, SMS.
+orders, gear rental, rooming, refund self-service, SMS.
 
 The schema leaves room for all of it - `members` is a real entity,
 `board_roles` / `board_user_roles` already model the seven roles with term

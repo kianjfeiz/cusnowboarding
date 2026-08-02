@@ -3,7 +3,6 @@ import NextAuth, { type NextAuthConfig, type DefaultSession } from "next-auth";
 // cannot locate "next-auth/jwt" as an augmentation target below.
 import type {} from "next-auth/jwt";
 import Google from "next-auth/providers/google";
-import Credentials from "next-auth/providers/credentials";
 import { authConfig } from "@/auth.config";
 import { loadBoardIdentity, touchLastLogin, type RoleKey } from "@/lib/authz";
 import { linkGoogleMember, lookupMemberByEmail } from "@/lib/member-account";
@@ -81,47 +80,15 @@ if (hasGoogle) {
   );
 }
 
-/**
- * Development-only sign-in, for local testing before real Google accounts are
- * wired up on a machine.
- *
- * This is behind TWO independent gates, both required:
- *   1. NODE_ENV must not be "production" - Next.js sets this on every real
- *      build and deploy, so the provider is not even constructed there.
- *   2. ALLOW_DEV_LOGIN must be explicitly "true" - opt-in per machine, and
- *      absent from .env.example so it is never on by default.
- *
- * It still goes through `loadBoardIdentity`, so it can only ever sign in an
- * address that is already on the board - it skips proving WHO you are, never
- * WHAT you may do. It grants nothing a Google sign-in would not.
- *
- * NEVER set ALLOW_DEV_LOGIN in a deployed environment. The two gates mean a
- * stray flag in production still does nothing, but the flag has no business
- * being there in the first place.
- */
-export const devLoginEnabled =
-  process.env.NODE_ENV !== "production" && process.env.ALLOW_DEV_LOGIN === "true";
+/*
+  Google is the only way in, deliberately - locally as well as in production.
 
-if (devLoginEnabled) {
-  providers.push(
-    Credentials({
-      id: "dev",
-      name: "Development sign-in",
-      credentials: { email: { label: "Board email", type: "email" } },
-      async authorize(credentials) {
-        const email = typeof credentials?.email === "string" ? credentials.email.trim() : "";
-        if (!email) return null;
-
-        // The board_users lookup is the whole gate: a non-board address returns
-        // null and no session is created, exactly as through Google.
-        const identity = await loadBoardIdentity(email);
-        if (!identity) return null;
-
-        return { id: identity.boardUserId, email: identity.email, name: identity.name };
-      },
-    }),
-  );
-}
+  There was a credentials provider here for local testing before Google was
+  provisioned. It is gone: a second path to a session is a second path to get
+  wrong, and every environment now exercises the same one members use. If a
+  future machine needs to sign in without Google, the answer is a test account
+  in the club's Workspace, not a new provider.
+*/
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -143,11 +110,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ user, account }) {
       const email = user.email;
       if (!email) return false;
-
-      // The dev provider only exists when devLoginEnabled is true (both gates
-      // passed), and its authorize() already confirmed the address is on the
-      // board. Nothing here needs to re-domain-check or link a member row.
-      if (account?.provider === "dev") return true;
 
       if (account?.provider !== "google") return false;
 

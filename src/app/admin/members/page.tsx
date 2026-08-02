@@ -38,21 +38,13 @@ export default async function MembersPage({
 
   return (
     <>
-      <PageHeader
-        title="Members"
-        subtitle="Everyone who has signed in. Members are created by signing in with Google, not here."
-      />
+      <PageHeader title="Members" />
 
       <Section
         title={
           search
             ? `${members.length} matching "${search}"`
             : `${members.length} members, newest first`
-        }
-        description={
-          members.length === LIMIT
-            ? `Showing the first ${LIMIT}. Search to narrow it down.`
-            : undefined
         }
         actions={
           <form method="get" className="flex items-center gap-2">

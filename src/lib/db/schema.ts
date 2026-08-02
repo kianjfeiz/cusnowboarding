@@ -283,6 +283,20 @@ export const trips = pgTable(
     rosterFinalizedBy: uuid("roster_finalized_by").references(() => boardUsers.id),
 
     /**
+     * Set when the board files a finished trip away.
+     *
+     * Purely a shelf, not a state: it changes nothing about the trip itself,
+     * and restoring is one click. It exists because a season's worth of trips
+     * makes the list unreadable long before anyone wants to destroy the roster
+     * and payment history those rows carry.
+     *
+     * Archived trips are hidden from every live listing, board and member
+     * alike, and the archive is the only place deletion is offered.
+     */
+    archivedAt: timestamptz("archived_at"),
+    archivedBy: uuid("archived_by").references(() => boardUsers.id),
+
+    /**
      * THE COUNTER. The sole source of server-side ordering for this trip.
      * Incrementing it is what takes the row lock during a claim, and the value
      * returned is the claimer's arrival position.

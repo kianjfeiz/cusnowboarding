@@ -115,6 +115,9 @@ trip_open as (
      -- member saw "signups are not open" and nothing alerted anyone. The clock
      -- is the authority. 'closed' still blocks, so an early manual close works.
      and t.status in ('scheduled','open')
+     -- Archived means out of the running. This is one more predicate on a row
+     -- the CTE already reads, so it costs no round trip and no count.
+     and t.archived_at is null
      and t.signup_opens_at <= now()
      and (t.signup_closes_at is null or t.signup_closes_at > now())
      and (
@@ -258,6 +261,7 @@ select
       -- Must mirror trip_open in the claim exactly. If these two ever disagree,
       -- a claim that failed for one reason gets explained by another.
       and t.status in ('scheduled','open')
+      and t.archived_at is null
       and t.signup_opens_at <= now()
       and (t.signup_closes_at is null or t.signup_closes_at > now())
   )::int as trip_open,

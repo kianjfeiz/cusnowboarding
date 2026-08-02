@@ -62,7 +62,8 @@ export interface RideSheet {
 /** Whether the sheet is open to this member at all - the roster page's gate. */
 export async function canUseRideSheet(tripId: string, memberId: string): Promise<boolean> {
   const rows = await execute<{ ok: boolean }>(
-    `select true as ok from trips where id = $1 and roster_finalized_at is not null`,
+    `select true as ok from trips
+      where id = $1 and roster_finalized_at is not null and archived_at is null`,
     [tripId],
   );
   if (rows.length === 0) return false;
@@ -157,7 +158,8 @@ async function isSheetMember(
        from signups s
        join trips t on t.id = s.trip_id
       where s.trip_id = $1 and s.member_id = $2 and s.status = 'paid'
-        and t.roster_finalized_at is not null`,
+        and t.roster_finalized_at is not null
+        and t.archived_at is null`,
     [tripId, memberId],
   );
   return (result.rowCount ?? 0) > 0;

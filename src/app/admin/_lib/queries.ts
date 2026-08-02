@@ -1,6 +1,7 @@
 import { execute } from "@/lib/db";
 import type { TripStatus } from "@/lib/db/schema";
 import { HOLD_GRACE_INTERVAL, HOLD_GRACE_MINUTES } from "@/lib/holds";
+import { NOT_ARCHIVED } from "@/lib/trip-scope";
 
 /**
  * Read models for the admin.
@@ -35,6 +36,8 @@ export type TripRow = {
   roster_finalized_at: Date | null;
   /** Non-null once outcomes have been published; members see nothing before. */
   results_released_at: Date | null;
+  /** Non-null once filed away. Hidden from every live listing; see listTrips. */
+  archived_at: Date | null;
 };
 
 export type TripSummary = TripRow & {
@@ -67,7 +70,7 @@ const TRIP_COLUMNS = `
   t.waitlist_cap, t.price_cents, t.payment_window_hours, t.requires_dues, t.payment_url,
   t.description, t.depart_at, t.return_at, t.signup_opens_at, t.signup_closes_at,
   t.claim_counter::int as claim_counter, t.roster_finalized_at,
-  t.results_released_at
+  t.results_released_at, t.archived_at
 `;
 
 const TRIP_COUNTS = `
@@ -87,12 +90,29 @@ const TRIP_COUNTS = `
   ) c on true
 `;
 
+/**
+ * Every trip still in play. Archived rows are excluded here rather than
+ * filtered by each caller, so a page added later cannot forget and resurrect a
+ * filed trip onto the dashboard.
+ */
 export async function listTrips(): Promise<TripSummary[]> {
   return execute<TripSummary>(
     `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups
        from trips t
        ${TRIP_COUNTS}
+      where ${NOT_ARCHIVED}
       order by t.signup_opens_at desc`,
+  );
+}
+
+/** Most recently filed first - the archive is read newest-first when read at all. */
+export async function listArchivedTrips(): Promise<TripSummary[]> {
+  return execute<TripSummary>(
+    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups
+       from trips t
+       ${TRIP_COUNTS}
+      where t.archived_at is not null
+      order by t.archived_at desc`,
   );
 }
 
@@ -222,6 +242,7 @@ export async function listUnpaidHolds(limit = 40): Promise<UnpaidHold[]> {
        join members m on m.id = s.member_id
       where s.status = 'held'
         and t.status in ('scheduled', 'open', 'closed')
+        and ${NOT_ARCHIVED}
       order by s.payment_deadline_at asc
       limit $1`,
     [limit],
@@ -258,6 +279,7 @@ export async function listPaymentsNeedingReview(limit = 20): Promise<ReviewPayme
        join members m on m.id = s.member_id
       where p.status = 'paid'
         and s.status in ('expired','cancelled')
+        and ${NOT_ARCHIVED}
       order by p.created_at desc
       limit $1`,
     [limit],
@@ -299,6 +321,7 @@ export async function listMembers(search: string, limit = 100): Promise<MemberRo
            join trips t on t.id = s.trip_id
           where s.member_id = m.id
             and s.status in ('held', 'paid', 'waitlisted')
+            and ${NOT_ARCHIVED}
        ) h on true
       where $1::text = ''
          or m.email::text ilike '%' || $1 || '%'

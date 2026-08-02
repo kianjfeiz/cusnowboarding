@@ -78,6 +78,13 @@
       "when": 1785642933654,
       "tag": "0010_sweet_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785650964965,
+      "tag": "0011_vengeful_firebrand",
+      "breakpoints": true
     }
   ]
 }

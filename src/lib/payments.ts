@@ -93,6 +93,7 @@ select s.id, s.pay_token, s.status::text as status, s.spot_number,
   join members m on m.id = s.member_id
   join trips   t on t.id = s.trip_id
  where s.pay_token = $1
+   and t.archived_at is null
 `;
 
 function toSignup(row: PayRow): PaySignup {

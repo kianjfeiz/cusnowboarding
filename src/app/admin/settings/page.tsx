@@ -9,11 +9,6 @@ import { assignRole, removeRole, setBoardUserActive } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-/** 2026 is the 2026-27 board. Writing it out avoids a year of "is that the start or the end?". */
-function termLabel(year: number): string {
-  return `${year}-${String((year + 1) % 100).padStart(2, "0")}`;
-}
-
 /**
  * Roles are stored per term year, but the board never has to think in those
  * terms: last season's roles stop granting anything on their own, so the screen
@@ -56,10 +51,7 @@ export default async function SettingsPage() {
 
   return (
     <>
-      <PageHeader
-        title="Settings"
-        subtitle={`Who can sign in to the board tool, and what each of them can do. Roles below are for the ${termLabel(thisTerm)} season; older ones have already stopped granting anything.`}
-      />
+      <PageHeader title="Settings" />
 
       <Section title={`${users.length} board users`}>
         <ul className="divide-y divide-border">
@@ -166,10 +158,7 @@ export default async function SettingsPage() {
       </Section>
 
       <div className="mt-6">
-        <Section
-          title="Add a board user"
-          description="There is no self-signup. An address that is not listed here is refused at sign-in."
-        >
+        <Section title="Add a board user">
           <AddBoardUser />
         </Section>
       </div>

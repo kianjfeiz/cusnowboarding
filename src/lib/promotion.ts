@@ -95,6 +95,9 @@ export async function releaseLapsedHolds(
         and exists (
           select 1 from trips t
            where t.id = signups.trip_id and t.results_released_at is not null
+             -- An archived trip is out of the running: reaping its spots would
+             -- email members about a trip that no longer appears anywhere.
+             and t.archived_at is null
         )
         and not exists (
           select 1 from payments p

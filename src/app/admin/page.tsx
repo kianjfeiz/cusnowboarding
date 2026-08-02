@@ -4,7 +4,7 @@ import { Countdown } from "@/components/admin/countdown";
 import { HOLD_GRACE_MINUTES } from "@/lib/holds";
 import { requireActor } from "./_lib/actor";
 import { getPaymentTotals, outstandingCents } from "./_lib/payment-queries";
-import { PHASE_HINTS, tripPhase } from "./_lib/trip-status";
+
 import {
   listPaymentsNeedingReview,
   listTrips,
@@ -111,10 +111,7 @@ export default async function AdminDashboard() {
                         minute: undefined,
                         timeZoneName: undefined,
                       })}
-                      {" · "}
-                      {opensAt > now
-                        ? `Opens ${formatDenver(trip.signup_opens_at)}`
-                        : PHASE_HINTS[tripPhase(trip, now)]}
+                      {opensAt > now ? ` · Opens ${formatDenver(trip.signup_opens_at)}` : ""}
                       {" · "}
                       {formatMoney(trip.price_cents)}
                     </p>

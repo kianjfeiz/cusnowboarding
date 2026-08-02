@@ -13,8 +13,8 @@ export async function SiteHeader() {
 
   const navItems: NavItem[] = [
     // Trip pages are reached from the Home list, so Home stays lit there.
-    { href: "/", label: "Home", covers: ["/trips"] },
-    { href: "/calendar", label: "Calendar" },
+    { href: "/", label: "Home", covers: ["/trips"], icon: "home" },
+    { href: "/calendar", label: "Calendar", icon: "calendar" },
     ...(user
       ? [
           {
@@ -23,10 +23,11 @@ export async function SiteHeader() {
             // All only ever reached from My trips, and the longer claims
             // outrank Home's blanket hold on /trips.
             covers: ["/trips/*/roster", "/trips/*/rides", "/pay"],
+            icon: "trips",
           },
         ]
       : []),
-    ...(user?.boardUserId ? [{ href: "/admin", label: "Board" }] : []),
+    ...(user?.boardUserId ? [{ href: "/admin", label: "Board", icon: "admin" }] : []),
   ];
 
   return (

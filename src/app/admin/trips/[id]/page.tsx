@@ -159,9 +159,7 @@ export default async function TripRosterPage({
     },
     curate: {
       title: "Curating - nobody has been told anything",
-      detail: `Signups closed ${formatDenver(
-        closesAt,
-      )}. Move people between the lists below until the group is right. Sending results publishes the outcome and starts the ${trip.payment_window_hours}-hour payment window for everyone on the trip.`,
+      detail: null,
       action: null,
     },
     collect: {
@@ -321,7 +319,6 @@ export default async function TripRosterPage({
         >
           Drop log
         </Link>
-        {" - the server's record of who arrived when, to the millisecond."}
       </p>
     </>
   );

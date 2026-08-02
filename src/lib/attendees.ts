@@ -88,9 +88,17 @@ export async function listAttendees(tripId: string): Promise<Attendee[]> {
 /** Whether a given member actually went, which is what gates the photo pool. */
 export async function isTripAttendee(tripId: string, memberId: string): Promise<boolean> {
   const rows = await execute<{ ok: boolean }>(
+    /*
+      The archived check belongs here rather than on each caller. This is the
+      single gate behind the photo pool and the ride sheet, and both are
+      reachable by API with a trip id alone - the pages 404ing on an archived
+      trip would not have closed either of them.
+    */
     `select true as ok
-       from signups
-      where trip_id = $1 and member_id = $2 and status = 'paid'
+       from signups s
+       join trips t on t.id = s.trip_id
+      where s.trip_id = $1 and s.member_id = $2 and s.status = 'paid'
+        and t.archived_at is null
       limit 1`,
     [tripId, memberId],
   );
@@ -152,6 +160,7 @@ export async function listMemberTrips(memberId: string): Promise<MemberTrip[]> {
        ) p on true
       where s.member_id = $1
         and s.status in ('held','paid','waitlisted')
+        and t.archived_at is null
       order by t.depart_at desc`,
     [memberId],
   );

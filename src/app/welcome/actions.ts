@@ -12,7 +12,7 @@ import { loadVerifiedMember } from "@/lib/verification";
  *
  * Identity comes from the claim cookie, which arm minted on the same response
  * that redirected here - deliberately not from the Google session, so this
- * page works identically for the dev provider and any future sign-in method.
+ * page works the same for any future sign-in method.
  */
 export async function confirmNameAction(formData: FormData): Promise<void> {
   const session = await getMemberSession();

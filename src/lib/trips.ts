@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { unstable_cache } from "next/cache";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db, execute } from "@/lib/db";
 import { trips, type Trip, type TripStatus } from "@/lib/db/schema";
 import { HOLD_OCCUPIES_SQL } from "@/lib/holds";
@@ -78,7 +78,10 @@ const listUpcomingTripsCached = unstable_cache(
         signupClosesAt: trips.signupClosesAt,
       })
       .from(trips)
-      .where(inArray(trips.status, ["scheduled", "open", "closed"]))
+      // Archiving is a board housekeeping action, but it has to reach the
+      // member list too - a filed trip that stayed on the home page would be
+      // the board tidying a screen nobody else sees.
+      .where(and(inArray(trips.status, ["scheduled", "open", "closed"]), isNull(trips.archivedAt)))
       .orderBy(desc(trips.signupOpensAt))
       .limit(20),
   ["upcoming-trips"],
@@ -115,7 +118,13 @@ export async function listUpcomingTrips(): Promise<UpcomingTripRow[]> {
  * scope is a single request, so nothing here outlives or crosses a render.
  */
 export const getTripBySlug = cache(async (slug: string): Promise<Trip | null> => {
-  const [trip] = await db.select().from(trips).where(eq(trips.slug, slug)).limit(1);
+  // An archived trip 404s rather than rendering a page nothing links to. The
+  // slug stays taken, so restoring the trip brings its old URL back intact.
+  const [trip] = await db
+    .select()
+    .from(trips)
+    .where(and(eq(trips.slug, slug), isNull(trips.archivedAt)))
+    .limit(1);
   return trip ?? null;
 });
 
@@ -155,6 +164,7 @@ export async function getMemberSignup(
        join trips t on t.id = s.trip_id
       where s.trip_id = $1 and s.member_id = $2
         and s.status in ('held','paid','waitlisted')
+        and t.archived_at is null
       limit 1`,
     [tripId, memberId],
   );

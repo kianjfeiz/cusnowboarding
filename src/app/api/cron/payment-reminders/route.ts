@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
           -- Nobody is chased for money before they have been told they have a
           -- spot. Releasing results is what starts their payment window.
           and t.results_released_at is not null
+          and t.archived_at is null
           and s.payment_deadline_at > now()
           and s.payment_deadline_at <= now() + make_interval(hours => $1::int)
           and not exists (

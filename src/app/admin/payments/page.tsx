@@ -6,7 +6,6 @@ import { Badge, Button, Notice, formatDenver, formatMoney } from "@/components/u
 import { can } from "@/lib/authz";
 import { requireCapability } from "../_lib/actor";
 import {
-  LINE_LIMIT,
   PAYMENT_FILTERS,
   PAYMENT_FILTER_LABELS,
   PAYMENT_STATE_LABELS,
@@ -100,7 +99,6 @@ export default async function PaymentsPage({
     <>
       <PageHeader
         title="Payments"
-        subtitle="The club bills through Fusion, which this app cannot read, so a spot counts as paid once someone records it here. Times are Mountain."
         actions={
           mayManage ? (
             <a
@@ -164,11 +162,6 @@ export default async function PaymentsPage({
           filter === "all"
             ? `${lines.length} signup${lines.length === 1 ? "" : "s"}`
             : `${lines.length} ${filter}`
-        }
-        description={
-          allLines.length >= LINE_LIMIT
-            ? `Showing the first ${LINE_LIMIT}. Pick a trip to narrow it down.`
-            : undefined
         }
         actions={
           <form method="get" className="flex flex-wrap items-center gap-2">

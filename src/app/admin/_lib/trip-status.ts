@@ -87,12 +87,10 @@ export const PHASE_LABELS: Record<TripPhase, string> = {
   completed: "Completed",
 };
 
-export const PHASE_HINTS: Record<TripPhase, string> = {
-  draft: "Hidden from members until published",
-  upcoming: "Opens on its own at the drop time",
-  live: "Members can claim right now",
-  over: "The signup window has passed",
-  closed: "Closed by the board, no further claims",
-  cancelled: "Called off",
-  completed: "Done and settled",
-};
+/*
+  There was a PHASE_HINTS map here, one sentence per phase, rendered under the
+  status badge. Every line restated its own badge - "Closed early" above
+  "Closed by the board, no further claims" - so it read as noise on a screen
+  the board scans rather than reads. The badge is the status; the phase labels
+  above are the vocabulary.
+*/

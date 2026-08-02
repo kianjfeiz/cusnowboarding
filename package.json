@@ -11,14 +11,14 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "db:seed": "tsx src/lib/db/seed.ts",
+    "board:bootstrap": "tsx scripts/bootstrap-board.ts",
     "storage:check": "tsx scripts/check-photo-storage.ts",
     "db:studio": "drizzle-kit studio",
     "db:up": "docker compose up -d && tsx scripts/wait-for-db.ts",
     "db:down": "docker compose down -v",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:race": "vitest run tests/race.test.ts",
-    "drop:rehearse": "tsx scripts/dry-run-drop.ts"
+    "test:race": "vitest run tests/race.test.ts"
   },
   "overrides": {
     "postcss": "^8.5.23",

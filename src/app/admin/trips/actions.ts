@@ -314,22 +314,88 @@ export async function setTripStatus(formData: FormData): Promise<void> {
 }
 
 /**
- * Deletes a trip that nobody ever entered.
+ * Files a trip away. Reversible, and it destroys nothing.
  *
- * Refused the moment a single signup exists, in any status. Every child table
- * cascades off `trips` - signups, and through them payments, plus photos and
- * the ride sheet - so deleting a trip with entrants silently destroys the
- * treasurer's reconciliation record for money that really moved. There is no
- * undo and no export on the way out.
+ * This is the ordinary end of a trip's life on the board's screens: the roster,
+ * the payments and the photos all stay exactly where they were, and the trip
+ * simply stops appearing in listings - member ones included, so archiving is
+ * not a board-only illusion.
+ */
+export async function archiveTrip(formData: FormData): Promise<void> {
+  const actor = await requireCapability("manageTrips");
+
+  const tripId = text(formData, "tripId");
+  if (!tripId) throw new Error("Missing trip id");
+
+  const rows = await execute<{ title: string }>(
+    `update trips set archived_at = now(), archived_by = $2, updated_at = now()
+      where id = $1 and archived_at is null
+      returning title`,
+    [tripId, actor.boardUserId],
+  );
+  if (rows.length === 0) throw new Error("That trip no longer exists, or is already archived.");
+
+  await recordAudit({
+    actorBoardUserId: actor.boardUserId,
+    action: "trip.archive",
+    entityType: "trip",
+    entityId: tripId,
+    data: { title: rows[0].title },
+  });
+
+  revalidatePath("/admin/trips");
+  revalidatePath("/admin/trips/archive");
+  revalidatePath("/admin");
+  revalidateTag("trips");
+}
+
+/** Puts an archived trip back on the board's list, and members' too. */
+export async function restoreTrip(formData: FormData): Promise<void> {
+  const actor = await requireCapability("manageTrips");
+
+  const tripId = text(formData, "tripId");
+  if (!tripId) throw new Error("Missing trip id");
+
+  const rows = await execute<{ title: string }>(
+    `update trips set archived_at = null, archived_by = null, updated_at = now()
+      where id = $1 and archived_at is not null
+      returning title`,
+    [tripId],
+  );
+  if (rows.length === 0) throw new Error("That trip no longer exists, or is not archived.");
+
+  await recordAudit({
+    actorBoardUserId: actor.boardUserId,
+    action: "trip.restore",
+    entityType: "trip",
+    entityId: tripId,
+    data: { title: rows[0].title },
+  });
+
+  revalidatePath("/admin/trips");
+  revalidatePath("/admin/trips/archive");
+  revalidatePath("/admin");
+  revalidateTag("trips");
+}
+
+/**
+ * Destroys an archived trip and everything hanging off it.
  *
- * A trip that has entrants and is not happening gets CANCELLED, which is what
- * that status is for: members are told, the roster survives, and the payments
- * stay auditable. Delete exists for the other case - the trip created with a
- * typo in the slug five minutes ago.
+ * Only reachable from the archive, and the `archived_at is not null` guard is
+ * what enforces that rather than the UI - deletion is never one click away
+ * from the live list. Archiving first is the deliberate pause: it is the step
+ * that makes this a decision rather than a mis-click on a busy row.
  *
- * The count is taken inside the delete rather than read first, so a claim
- * landing between the check and the delete loses to the `not exists` guard
- * instead of being erased by it.
+ * What actually dies: every child table cascades off `trips` - signups, and
+ * through them payments, plus photos and the ride sheet. For a trip that ran,
+ * that includes the treasurer's reconciliation record for money that really
+ * moved. The confirmation names those counts because the row itself cannot.
+ *
+ * The stored photos are removed BEFORE the row, because the object keys only
+ * exist in `trip_photos`; cascading that away first would strand the files in
+ * the bucket with nothing left pointing at them. A failure here aborts the
+ * delete, which is the right way round - an orphaned object costs pennies, a
+ * half-deleted trip costs an evening.
  */
 export async function deleteTrip(formData: FormData): Promise<void> {
   const actor = await requireCapability("manageTrips");
@@ -337,19 +403,33 @@ export async function deleteTrip(formData: FormData): Promise<void> {
   const tripId = text(formData, "tripId");
   if (!tripId) throw new Error("Missing trip id");
 
-  const rows = await execute<{ title: string; slug: string }>(
+  const photos = await execute<{ storage_key: string; thumbnail_key: string | null }>(
+    `select p.storage_key, p.thumbnail_key
+       from trip_photos p
+       join trips t on t.id = p.trip_id
+      where p.trip_id = $1 and t.archived_at is not null`,
+    [tripId],
+  );
+
+  if (photos.length > 0) {
+    const { deleteObject } = await import("@/lib/storage/r2");
+    for (const photo of photos) {
+      for (const key of [photo.storage_key, photo.thumbnail_key]) {
+        if (key) await deleteObject(key);
+      }
+    }
+  }
+
+  const rows = await execute<{ title: string; slug: string; signups: number }>(
     `delete from trips
-      where id = $1
-        and not exists (select 1 from signups where trip_id = $1)
-      returning title, slug`,
+      where id = $1 and archived_at is not null
+      returning title, slug,
+        (select count(*)::int from signups where trip_id = $1) as signups`,
     [tripId],
   );
 
   if (rows.length === 0) {
-    throw new Error(
-      "That trip has signups, so it cannot be deleted. Cancel it instead - " +
-        "members are told, and the roster and payment records survive.",
-    );
+    throw new Error("A trip has to be archived before it can be deleted.");
   }
 
   await recordAudit({
@@ -358,11 +438,17 @@ export async function deleteTrip(formData: FormData): Promise<void> {
     entityType: "trip",
     entityId: tripId,
     // The row is gone, so the audit entry is the only remaining record of it.
-    data: { slug: rows[0].slug, title: rows[0].title },
+    data: {
+      slug: rows[0].slug,
+      title: rows[0].title,
+      signups: rows[0].signups,
+      photos: photos.length,
+    },
   });
 
   revalidatePath("/admin/trips");
+  revalidatePath("/admin/trips/archive");
   revalidatePath("/admin");
   revalidateTag("trips");
-  redirect("/admin/trips");
+  redirect("/admin/trips/archive");
 }

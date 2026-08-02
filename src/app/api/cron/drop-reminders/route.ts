@@ -40,6 +40,7 @@ export async function POST(request: NextRequest) {
       `select t.id, t.slug, t.title, t.signup_opens_at, t.requires_dues
          from trips t
         where t.status in ('scheduled','open')
+          and t.archived_at is null
           and t.signup_opens_at > now()
           and t.signup_opens_at <= now() + make_interval(hours => $1::int)
           and not exists (

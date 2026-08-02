@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { auth, devLoginEnabled, googleLoginEnabled } from "@/auth";
-import { Button, Input, Notice } from "@/components/ui";
+import { auth, googleLoginEnabled } from "@/auth";
+import { Button, Notice } from "@/components/ui";
 import { signInWithGoogle } from "./actions";
-import { devSignIn } from "./dev-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -54,19 +53,6 @@ export default async function LoginPage({
           </Notice>
         )}
       </div>
-
-      {devLoginEnabled ? (
-        <form action={devSignIn} className="mt-6 space-y-2 rounded-md border border-border bg-surface p-4">
-          <p className="text-xs text-ink-muted">
-            Development sign-in. Local only, board addresses only. Not available
-            in production.
-          </p>
-          <Input name="email" type="email" placeholder="board@colorado.edu" required />
-          <Button type="submit" variant="secondary" className="w-full">
-            Dev sign-in
-          </Button>
-        </form>
-      ) : null}
     </main>
   );
 }

@@ -213,6 +213,7 @@ export async function listPaymentLines(
           limit 1
        ) p on true
       where ($1::uuid is null or s.trip_id = $1)
+        and t.archived_at is null
         -- Payment-bearing: allocated a spot, or money changed hands at some
         -- point even though the spot is gone.
         and (s.status in ('held', 'paid', 'refunded') or p.id is not null)
@@ -291,7 +292,8 @@ export async function getPaymentTotals(): Promise<PaymentTotals> {
          as lapsed_count
      from signups s
      join trips t on t.id = s.trip_id
-     where t.status in ${LIVE_TRIP_STATUSES}`,
+     where t.status in ${LIVE_TRIP_STATUSES}
+       and t.archived_at is null`,
   );
 
   return (
@@ -333,6 +335,7 @@ export async function listLiveTrips(): Promise<LiveTrip[]> {
     `select id, title, payment_url
        from trips
       where status in ${LIVE_TRIP_STATUSES}
+        and archived_at is null
       order by depart_at`,
   );
 }
@@ -353,6 +356,7 @@ export async function listPaymentTripOptions(limit = 200): Promise<PaymentTripOp
     `select id, title, status::text as trip_status
        from trips
       where status <> 'draft'
+        and archived_at is null
       order by depart_at desc
       limit $1`,
     [limit],

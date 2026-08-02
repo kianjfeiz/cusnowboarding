@@ -64,6 +64,7 @@ export async function listUnpaidRecipients(
       where s.status = 'held'
         and s.paid_at is null
         and t.status in ${LIVE_TRIP_STATUSES}
+        and t.archived_at is null
         and t.results_released_at is not null
         and ($1::uuid is null or s.trip_id = $1)
       order by t.depart_at, t.title, s.spot_number nulls last, s.claim_seq

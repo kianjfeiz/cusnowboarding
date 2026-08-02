@@ -165,6 +165,7 @@ export async function listCalendarItems(range: CalendarRange): Promise<CalendarI
               depart_at, return_at
          from trips
         where status in ${CALENDAR_TRIP_STATUSES}
+          and archived_at is null
           and depart_at < $2
           and (depart_at >= $1 or coalesce(return_at, depart_at) > $1)
         order by depart_at`,

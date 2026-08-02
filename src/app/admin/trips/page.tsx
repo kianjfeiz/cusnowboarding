@@ -4,15 +4,14 @@ import { EmptyRow, PageHeader, Section, TableWrap, Td, Th } from "@/components/a
 import { SubmitButton } from "@/components/admin/submit-button";
 import { can } from "@/lib/authz";
 import { requireActor } from "../_lib/actor";
-import { listTrips, occupancyOf, type TripSummary } from "../_lib/queries";
+import { listArchivedTrips, listTrips, occupancyOf, type TripSummary } from "../_lib/queries";
 import {
-  PHASE_HINTS,
   PHASE_LABELS,
   transitionLabel,
   tripPhase,
   type TripPhase,
 } from "../_lib/trip-status";
-import { deleteTrip, setTripStatus } from "./actions";
+import { archiveTrip, setTripStatus } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +44,7 @@ function rowAction(
 
 export default async function TripsPage() {
   const actor = await requireActor();
-  const trips = await listTrips();
+  const [trips, archived] = await Promise.all([listTrips(), listArchivedTrips()]);
   const mayManage = can(actor, "manageTrips");
   const now = Date.now();
 
@@ -53,17 +52,28 @@ export default async function TripsPage() {
     <>
       <PageHeader
         title="Trips"
-        subtitle="Newest drop first. A trip opens for claims on its own at the drop time."
         actions={
-          mayManage ? (
-            <Link href="/admin/trips/new">
-              <Button>New trip</Button>
-            </Link>
-          ) : null
+          <div className="flex items-center gap-2">
+            {/* Only offered once something is in there - an empty archive is a
+                link to an empty page. */}
+            {archived.length > 0 ? (
+              <Link
+                href="/admin/trips/archive"
+                className="inline-flex h-10 items-center rounded-md border border-border-strong px-3 text-xs font-medium hover:bg-surface sm:h-8"
+              >
+                Archive {archived.length}
+              </Link>
+            ) : null}
+            {mayManage ? (
+              <Link href="/admin/trips/new">
+                <Button>New trip</Button>
+              </Link>
+            ) : null}
+          </div>
         }
       />
 
-      <Section title={`${trips.length} trips`}>
+      <Section title={`${trips.length} trip${trips.length === 1 ? "" : "s"}`}>
         <TableWrap>
           <table className="w-full text-sm">
             <thead className="border-b border-border">
@@ -83,6 +93,9 @@ export default async function TripsPage() {
                   const { taken } = occupancyOf(trip);
                   const phase = tripPhase(trip, now);
                   const action = rowAction(trip, phase, now);
+                  // Holds still running plus holds already past their deadline:
+                  // both are spots the club is owed money for.
+                  const unsettled = trip.held + trip.lapsed;
 
                   return (
                     <tr key={trip.id} className="hover:bg-surface">
@@ -103,11 +116,13 @@ export default async function TripsPage() {
                         <Badge emphasis={phase === "live" ? "strong" : "normal"}>
                           {PHASE_LABELS[phase]}
                         </Badge>
-                        <span className="mt-0.5 block whitespace-nowrap text-xs text-ink-faint">
-                          {phase === "upcoming"
-                            ? `Opens ${formatDenver(trip.signup_opens_at)}`
-                            : PHASE_HINTS[phase]}
-                        </span>
+                        {/* Only the drop time earns a second line. Every other
+                            phase's hint just said the badge again in a sentence. */}
+                        {phase === "upcoming" ? (
+                          <span className="mt-0.5 block whitespace-nowrap text-xs text-ink-faint">
+                            Opens {formatDenver(trip.signup_opens_at)}
+                          </span>
+                        ) : null}
                       </Td>
 
                       <Td className="whitespace-nowrap text-right">
@@ -159,18 +174,25 @@ export default async function TripsPage() {
                               Edit
                             </Link>
                           ) : null}
-                          {/* Only for a trip nobody has entered. Once there are
-                              signups the honest action is Cancel, which keeps
-                              the roster and the payment record - see deleteTrip. */}
-                          {mayManage && trip.signups === 0 ? (
-                            <form action={deleteTrip}>
+                          {/* Archive, not delete. Nothing here is destructive
+                              and the trip comes back in one click, so it is a
+                              plain button - except when money is still owed.
+                              Archiving takes the trip out of Payments, the
+                              reminder cron and the member's own list, which
+                              would quietly retire a debt nobody settled. */}
+                          {mayManage ? (
+                            <form action={archiveTrip}>
                               <input type="hidden" name="tripId" value={trip.id} />
                               <SubmitButton
-                                variant="danger"
-                                pendingLabel="Deleting"
-                                confirm={`Delete "${trip.title}"? Nobody has entered it, and this cannot be undone.`}
+                                variant="secondary"
+                                pendingLabel="Archiving"
+                                confirm={
+                                  unsettled > 0
+                                    ? `${unsettled} spot${unsettled === 1 ? "" : "s"} on "${trip.title}" ${unsettled === 1 ? "is" : "are"} still unpaid. Archiving hides the trip from Payments and stops its reminders. Archive anyway?`
+                                    : undefined
+                                }
                               >
-                                Delete
+                                Archive
                               </SubmitButton>
                             </form>
                           ) : null}
