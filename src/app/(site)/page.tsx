@@ -179,7 +179,7 @@ export default async function Home() {
             <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
               {heroState.live ? (
                 <p className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                  Type fast. Good luck.
+                  Good luck!
                 </p>
               ) : (
                 <p className="tnum text-4xl font-semibold tracking-tight sm:text-5xl">
