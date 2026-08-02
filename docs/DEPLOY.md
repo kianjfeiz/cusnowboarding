@@ -148,12 +148,29 @@ DIRECT_DATABASE_URL="postgresql://...neon.tech/neondb" \
 4. Check email actually sends - the drop-reminder or a results email.
 5. `npm run storage:check` against production R2 to prove uploads work.
 
-## Afterwards
+## 13. Scheduled jobs
 
-- **Vercel Hobby caps crons at once per day**, which is not enough for the
-  15-minute hold-expiry job. Holds still read as expired (expiry is lazy), but
-  spots will not free up for promotion promptly. Pro, or trigger `/api/cron/*`
-  from an external scheduler with `Authorization: Bearer $CRON_SECRET`.
+Vercel Hobby allows one cron run per day, and a `*/15` schedule in
+`vercel.json` is a hard **build failure**, not a warning. So `vercel.json` now
+declares daily runs as a floor, and `.github/workflows/cron.yml` provides the
+real cadence every 30 minutes - no extra platform, no cost.
+
+Add two repository secrets under **GitHub → Settings → Secrets and variables →
+Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `CRON_BASE_URL` | `https://cusnowboarding.com` |
+| `CRON_SECRET` | the same value set in Vercel |
+
+Then run it once by hand from the **Actions** tab to prove the auth works. A
+401 fails the run loudly, which is the point - a scheduled job that has been
+quietly failing for a month is the thing to design against.
+
+On Pro, delete the workflow and set `vercel.json` back to `*/15 * * * *` for
+expire-holds and `0 * * * *` for the two reminder jobs.
+
+## Afterwards
 - Before the season's first real drop, run `RACE_ITERATIONS=200` against a
   preview deployment on a Neon branch. Local Postgres over loopback is ~0.1ms;
   Vercel-to-Neon is 1-3ms, and only the deployed test shows the true tail.
