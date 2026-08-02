@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import type { TripFormState } from "@/app/admin/trips/actions";
 import { Button, Field, Input, Notice } from "@/components/ui";
 import { DateTimePicker } from "@/components/admin/date-time-picker";
+import { DateRangePicker } from "@/components/admin/date-range-picker";
 import { SIGNUP_WINDOW_HOURS } from "@/lib/signup-window";
 
 export interface TripFormDefaults {
@@ -70,14 +71,14 @@ export function TripForm({
           />
         </Field>
 
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="Departs" hint="Mountain Time.">
-            <DateTimePicker name="departAt" defaultValue={defaults.departAt} required />
-          </Field>
-          <Field label="Returns" hint="Mountain Time. Same day for a day trip.">
-            <DateTimePicker name="returnAt" defaultValue={defaults.returnAt} required />
-          </Field>
-        </div>
+        <Field label="Trip dates" hint="Mountain Time. Pick the departure, then the return.">
+          <DateRangePicker
+            startName="departAt"
+            endName="returnAt"
+            startDefault={defaults.departAt}
+            endDefault={defaults.returnAt}
+          />
+        </Field>
 
         <Field
           label="Signups open"

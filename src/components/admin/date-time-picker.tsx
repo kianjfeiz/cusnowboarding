@@ -15,54 +15,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
  * what the surrounding form says and what parseDenverInput expects.
  */
 
-const DAY_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-interface Parts {
-  year: number;
-  month: number; // 0-indexed
-  day: number;
-  hour: number;
-  minute: number;
-}
-
-function parseValue(value: string): Parts | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
-  if (!m) return null;
-  return {
-    year: Number(m[1]),
-    month: Number(m[2]) - 1,
-    day: Number(m[3]),
-    hour: Number(m[4]),
-    minute: Number(m[5]),
-  };
-}
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-function toValue(p: Parts): string {
-  return `${p.year}-${pad(p.month + 1)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
-}
-
-function formatDisplay(p: Parts | null): string {
-  if (!p) return "";
-  const h12 = p.hour % 12 === 0 ? 12 : p.hour % 12;
-  const suffix = p.hour < 12 ? "AM" : "PM";
-  return `${MONTHS[p.month].slice(0, 3)} ${p.day}, ${p.year} at ${h12}:${pad(p.minute)} ${suffix}`;
-}
-
-/** Days shown in the grid, including the leading blanks for alignment. */
-function monthGrid(year: number, month: number): Array<number | null> {
-  const first = new Date(Date.UTC(year, month, 1)).getUTCDay();
-  const count = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  return [
-    ...Array.from({ length: first }, () => null),
-    ...Array.from({ length: count }, (_, i) => i + 1),
-  ];
-}
+import {
+  DAY_LABELS,
+  MONTHS,
+  type Parts,
+  formatDisplay,
+  monthGrid,
+  pad,
+  parseValue,
+  shiftedMonth,
+  toValue,
+} from "./date-parts";
 
 export function DateTimePicker({
   name,
@@ -130,9 +93,9 @@ export function DateTimePicker({
   }
 
   function shiftMonth(delta: number) {
-    const next = new Date(Date.UTC(viewYear, viewMonth + delta, 1));
-    setViewYear(next.getUTCFullYear());
-    setViewMonth(next.getUTCMonth());
+    const next = shiftedMonth(viewYear, viewMonth, delta);
+    setViewYear(next.year);
+    setViewMonth(next.month);
   }
 
   const grid = monthGrid(viewYear, viewMonth);
