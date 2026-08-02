@@ -126,6 +126,14 @@ export const members = pgTable(
     firstName: text("first_name").notNull(),
     lastName: text("last_name").notNull(),
     phone: text("phone"),
+    /**
+     * When the member last typed their own name, as opposed to us guessing it
+     * from a Google profile (whose fallback is the email local-part - nobody
+     * wants "kife1762" on a roster). Null routes the next sign-in through the
+     * welcome page. Rosters, the treasurer's tables, and photo credits all
+     * join this row at read time, so confirming once fixes every surface.
+     */
+    nameConfirmedAt: timestamptz("name_confirmed_at"),
     /** Null means unverified, which means they cannot claim a spot. */
     emailVerifiedAt: timestamptz("email_verified_at"),
     /** Dues paid. Imported by the treasurer from the club roster. */

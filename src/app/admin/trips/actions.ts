@@ -312,3 +312,57 @@ export async function setTripStatus(formData: FormData): Promise<void> {
   revalidatePath("/admin");
   revalidateTag("trips");
 }
+
+/**
+ * Deletes a trip that nobody ever entered.
+ *
+ * Refused the moment a single signup exists, in any status. Every child table
+ * cascades off `trips` - signups, and through them payments, plus photos and
+ * the ride sheet - so deleting a trip with entrants silently destroys the
+ * treasurer's reconciliation record for money that really moved. There is no
+ * undo and no export on the way out.
+ *
+ * A trip that has entrants and is not happening gets CANCELLED, which is what
+ * that status is for: members are told, the roster survives, and the payments
+ * stay auditable. Delete exists for the other case - the trip created with a
+ * typo in the slug five minutes ago.
+ *
+ * The count is taken inside the delete rather than read first, so a claim
+ * landing between the check and the delete loses to the `not exists` guard
+ * instead of being erased by it.
+ */
+export async function deleteTrip(formData: FormData): Promise<void> {
+  const actor = await requireCapability("manageTrips");
+
+  const tripId = text(formData, "tripId");
+  if (!tripId) throw new Error("Missing trip id");
+
+  const rows = await execute<{ title: string; slug: string }>(
+    `delete from trips
+      where id = $1
+        and not exists (select 1 from signups where trip_id = $1)
+      returning title, slug`,
+    [tripId],
+  );
+
+  if (rows.length === 0) {
+    throw new Error(
+      "That trip has signups, so it cannot be deleted. Cancel it instead - " +
+        "members are told, and the roster and payment records survive.",
+    );
+  }
+
+  await recordAudit({
+    actorBoardUserId: actor.boardUserId,
+    action: "trip.delete",
+    entityType: "trip",
+    entityId: tripId,
+    // The row is gone, so the audit entry is the only remaining record of it.
+    data: { slug: rows[0].slug, title: rows[0].title },
+  });
+
+  revalidatePath("/admin/trips");
+  revalidatePath("/admin");
+  revalidateTag("trips");
+  redirect("/admin/trips");
+}

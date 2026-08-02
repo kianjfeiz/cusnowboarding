@@ -91,7 +91,6 @@ export default async function TripRidesPage({
           tripId={trip.id}
           slug={slug}
           memberId={member.id}
-          memberPhone={member.phone ?? ""}
           error={error}
         />
       )}
@@ -103,13 +102,11 @@ async function RideSheetView({
   tripId,
   slug,
   memberId,
-  memberPhone,
   error,
 }: {
   tripId: string;
   slug: string;
   memberId: string;
-  memberPhone: string;
   error?: string;
 }) {
   const sheet = await getRideSheet(tripId, memberId);
@@ -121,6 +118,19 @@ async function RideSheetView({
       {error && ERRORS[error] ? (
         <Notice tone="alert">{ERRORS[error]}</Notice>
       ) : null}
+
+      {/* Drivers first: someone offering a car should not have to scroll past
+          every existing one to find the form. Riders scan the list right below
+          it either way. */}
+      {!hasRide ? (
+        <OfferForm slug={slug} />
+      ) : (
+        <p className="text-xs text-ink-faint">
+          {drivingRideId
+            ? "You are on the sheet as a driver. Cancel your ride if plans changed."
+            : "You have a seat. Leave it first if you want to drive or switch cars."}
+        </p>
+      )}
 
       {sheet.rides.length === 0 ? (
         <Notice title="No cars yet">
@@ -135,7 +145,6 @@ async function RideSheetView({
                 ride={ride}
                 slug={slug}
                 memberId={memberId}
-                memberPhone={memberPhone}
                 viewerHasRide={hasRide}
                 isViewerSeat={ride.id === seatRideId}
                 isViewerRide={ride.id === drivingRideId}
@@ -143,16 +152,6 @@ async function RideSheetView({
             </li>
           ))}
         </ul>
-      )}
-
-      {!hasRide ? (
-        <OfferForm slug={slug} memberPhone={memberPhone} />
-      ) : (
-        <p className="text-xs text-ink-faint">
-          {drivingRideId
-            ? "You are on the sheet as a driver. Cancel your ride if plans changed."
-            : "You have a seat. Leave it first if you want to drive or switch cars."}
-        </p>
       )}
 
       <p className="text-xs text-ink-faint">
@@ -168,7 +167,6 @@ function RideCard({
   ride,
   slug,
   memberId,
-  memberPhone,
   viewerHasRide,
   isViewerSeat,
   isViewerRide,
@@ -176,7 +174,6 @@ function RideCard({
   ride: RideView;
   slug: string;
   memberId: string;
-  memberPhone: string;
   viewerHasRide: boolean;
   isViewerSeat: boolean;
   isViewerRide: boolean;
@@ -275,8 +272,7 @@ function RideCard({
                 name="phone"
                 type="tel"
                 required
-                defaultValue={memberPhone}
-                placeholder="303 555 0123"
+                placeholder="1 234 567 8910"
                 className="max-w-56"
               />
             </label>
@@ -288,7 +284,7 @@ function RideCard({
   );
 }
 
-function OfferForm({ slug, memberPhone }: { slug: string; memberPhone: string }) {
+function OfferForm({ slug }: { slug: string }) {
   return (
     <Card className="p-5">
       <h2 className="text-lg font-semibold tracking-tight">Offer your car</h2>
@@ -321,13 +317,7 @@ function OfferForm({ slug, memberPhone }: { slug: string; memberPhone: string })
             </select>
           </Field>
           <Field label="Your phone number" hint="Shown to people on this trip.">
-            <Input
-              name="phone"
-              type="tel"
-              required
-              defaultValue={memberPhone}
-              placeholder="303 555 0123"
-            />
+            <Input name="phone" type="tel" required placeholder="1 234 567 8910" />
           </Field>
         </div>
 

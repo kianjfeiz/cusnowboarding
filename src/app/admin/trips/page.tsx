@@ -12,7 +12,7 @@ import {
   tripPhase,
   type TripPhase,
 } from "../_lib/trip-status";
-import { setTripStatus } from "./actions";
+import { deleteTrip, setTripStatus } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -158,6 +158,21 @@ export default async function TripsPage() {
                             >
                               Edit
                             </Link>
+                          ) : null}
+                          {/* Only for a trip nobody has entered. Once there are
+                              signups the honest action is Cancel, which keeps
+                              the roster and the payment record - see deleteTrip. */}
+                          {mayManage && trip.signups === 0 ? (
+                            <form action={deleteTrip}>
+                              <input type="hidden" name="tripId" value={trip.id} />
+                              <SubmitButton
+                                variant="danger"
+                                pendingLabel="Deleting"
+                                confirm={`Delete "${trip.title}"? Nobody has entered it, and this cannot be undone.`}
+                              >
+                                Delete
+                              </SubmitButton>
+                            </form>
                           ) : null}
                         </div>
                       </Td>

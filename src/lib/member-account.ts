@@ -31,6 +31,8 @@ export interface LinkedMember {
   email: string;
   firstName: string;
   lastName: string;
+  /** Null until the member has typed their own name once - see the welcome page. */
+  nameConfirmedAt: Date | null;
 }
 
 function splitName(name: string | null | undefined, email: string): [string, string] {
@@ -70,7 +72,8 @@ export async function linkGoogleMember(identity: GoogleIdentity): Promise<Linked
            last_login_at     = now(),
            updated_at        = now()
      returning id, token_version as "tokenVersion", email::text as email,
-               first_name as "firstName", last_name as "lastName"`,
+               first_name as "firstName", last_name as "lastName",
+               name_confirmed_at as "nameConfirmedAt"`,
     [email, firstName, lastName, identity.sub, identity.picture ?? null],
   );
 
@@ -90,7 +93,8 @@ export async function linkGoogleMember(identity: GoogleIdentity): Promise<Linked
 export async function lookupMemberByEmail(email: string): Promise<LinkedMember | null> {
   const rows = await execute<LinkedMember>(
     `select id, token_version as "tokenVersion", email::text as email,
-            first_name as "firstName", last_name as "lastName"
+            first_name as "firstName", last_name as "lastName",
+            name_confirmed_at as "nameConfirmedAt"
        from members
       where email = $1 and is_blocked = false`,
     [email.trim().toLowerCase()],

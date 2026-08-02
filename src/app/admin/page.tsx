@@ -4,6 +4,7 @@ import { Countdown } from "@/components/admin/countdown";
 import { HOLD_GRACE_MINUTES } from "@/lib/holds";
 import { requireActor } from "./_lib/actor";
 import { getPaymentTotals, outstandingCents } from "./_lib/payment-queries";
+import { PHASE_HINTS, tripPhase } from "./_lib/trip-status";
 import {
   listPaymentsNeedingReview,
   listTrips,
@@ -12,6 +13,9 @@ import {
 } from "./_lib/queries";
 
 export const dynamic = "force-dynamic";
+
+/** Enough to see the season coming without the dashboard becoming the trip list. */
+const DASHBOARD_TRIPS = 3;
 
 /**
  * One screen answering "what needs a board member today". Everything that is
@@ -32,13 +36,17 @@ export default async function AdminDashboard() {
   const now = Date.now();
   const live = trips.filter((t) => ["scheduled", "open", "closed"].includes(t.status));
 
-  // The next drop is the soonest signup window that has not opened yet.
-  const nextDrop = live
-    .filter((t) => new Date(t.signup_opens_at).getTime() > now)
-    .sort(
-      (a, b) =>
-        new Date(a.signup_opens_at).getTime() - new Date(b.signup_opens_at).getTime(),
-    )[0];
+  /*
+    Ordered by when the trip actually happens, not by when its signups opened.
+
+    The old version listed only trips whose drop was still in the future, which
+    meant the panel emptied out the moment the last drop opened - the board lost
+    sight of the trips precisely while they were running. A trip belongs here
+    until it departs, whatever its signup window has done.
+  */
+  const upcoming = live
+    .filter((t) => new Date(t.depart_at).getTime() > now)
+    .sort((a, b) => new Date(a.depart_at).getTime() - new Date(b.depart_at).getTime());
 
   // Same grace the reaper and the trip pages use, so a hold is called lapsed
   // here only once its spot is genuinely reclaimable. Without it this screen
@@ -62,24 +70,8 @@ export default async function AdminDashboard() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
-          <p className="text-xs uppercase tracking-wide text-ink-faint">Next drop</p>
-          {nextDrop ? (
-            <>
-              <div className="mt-2 flex flex-wrap items-baseline justify-between gap-3">
-                <Link
-                  href={`/admin/trips/${nextDrop.id}`}
-                  className="text-lg font-semibold hover:underline"
-                >
-                  {nextDrop.title}
-                </Link>
-                <Countdown targetMs={new Date(nextDrop.signup_opens_at).getTime()} />
-              </div>
-              <p className="mt-1 text-sm text-ink-muted">
-                Opens {formatDenver(nextDrop.signup_opens_at)} · {nextDrop.capacity} spots ·{" "}
-                {formatMoney(nextDrop.price_cents)}
-              </p>
-            </>
-          ) : (
+          <p className="text-xs uppercase tracking-wide text-ink-faint">Upcoming trips</p>
+          {upcoming.length === 0 ? (
             <p className="mt-2 text-sm text-ink-muted">
               Nothing scheduled.{" "}
               <Link href="/admin/trips/new" className="text-accent underline underline-offset-4">
@@ -87,7 +79,58 @@ export default async function AdminDashboard() {
               </Link>
               .
             </p>
+          ) : (
+            <ul className="mt-2 divide-y divide-border">
+              {upcoming.slice(0, DASHBOARD_TRIPS).map((trip) => {
+                const opensAt = new Date(trip.signup_opens_at).getTime();
+                const { taken, free } = occupancyOf(trip);
+
+                return (
+                  <li key={trip.id} className="py-2 first:pt-0 last:pb-0">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <Link
+                        href={`/admin/trips/${trip.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {trip.title}
+                      </Link>
+                      {/* The countdown is only news before the drop; afterwards
+                          what the board wants is how full the trip is. */}
+                      {opensAt > now ? (
+                        <Countdown targetMs={opensAt} />
+                      ) : (
+                        <span className="tnum text-sm text-ink-muted">
+                          {taken}/{trip.capacity}
+                          {free === 0 ? " full" : ""}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-sm text-ink-muted">
+                      {formatDenver(trip.depart_at, {
+                        hour: undefined,
+                        minute: undefined,
+                        timeZoneName: undefined,
+                      })}
+                      {" · "}
+                      {opensAt > now
+                        ? `Opens ${formatDenver(trip.signup_opens_at)}`
+                        : PHASE_HINTS[tripPhase(trip, now)]}
+                      {" · "}
+                      {formatMoney(trip.price_cents)}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
           )}
+          {upcoming.length > DASHBOARD_TRIPS ? (
+            <Link
+              href="/admin/trips"
+              className="mt-3 inline-flex h-10 items-center rounded-md border border-border-strong px-3 text-xs font-medium hover:bg-surface sm:h-8"
+            >
+              All {upcoming.length} trips
+            </Link>
+          ) : null}
         </Card>
 
         <Card>

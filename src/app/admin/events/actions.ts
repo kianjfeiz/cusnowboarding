@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import {
   EVENT_KINDS,
   canTransitionEvent,
+  deleteEvent,
   eventAuditAction,
   getEvent,
   insertEvent,
@@ -162,5 +163,36 @@ export async function setEventStatus(formData: FormData): Promise<void> {
   revalidatePath("/admin/events");
   revalidatePath("/calendar");
   // The shared month-grid cache keys off this tag.
+  revalidateTag("events");
+}
+
+/**
+ * Deletes the event outright.
+ *
+ * No soft-delete and no cancelled state to fall back to: an event has no
+ * signups, no money and nothing to reconcile, so keeping a tombstone only
+ * left the board a list of things that were not happening. The audit row is
+ * the record.
+ */
+export async function deleteEventAction(formData: FormData): Promise<void> {
+  const actor = await requireCapability("manageEvents");
+
+  const eventId = String(formData.get("eventId") ?? "");
+  const event = await getEvent(eventId);
+  if (!event) throw new Error("Event not found");
+
+  await deleteEvent(eventId);
+
+  await recordAudit({
+    actorBoardUserId: actor.boardUserId,
+    action: "event.delete",
+    entityType: "event",
+    entityId: eventId,
+    // The row is gone, so the audit entry carries enough to say what it was.
+    data: { slug: event.slug, title: event.title, startsAt: event.starts_at },
+  });
+
+  revalidatePath("/admin/events");
+  revalidatePath("/calendar");
   revalidateTag("events");
 }

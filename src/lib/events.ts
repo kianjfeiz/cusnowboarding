@@ -36,14 +36,20 @@ export const EVENT_STATUS_HINTS: Record<ClubEventStatus, string> = {
 
 /**
  * Allowed status moves, written out rather than inferred, the same way trip
- * statuses are. A cancelled event goes back to draft rather than straight to
- * published: un-cancelling something in front of the whole club should be a
- * deliberate second step.
+ * statuses are.
+ *
+ * An event is only ever draft or published. There is no cancel and no restore:
+ * an event that is not happening gets deleted, because unlike a trip it
+ * carries no signups, no money and nothing to reconcile later - a "cancelled"
+ * row was only clutter on the board's list plus a button to un-clutter it.
+ *
+ * `cancelled` stays in the enum for rows written before this, and has no moves
+ * left on purpose: Delete is the way out, which is the whole point.
  */
 const EVENT_TRANSITIONS: Record<ClubEventStatus, ClubEventStatus[]> = {
-  draft: ["published", "cancelled"],
-  published: ["draft", "cancelled"],
-  cancelled: ["draft"],
+  draft: ["published"],
+  published: ["draft"],
+  cancelled: [],
 };
 
 export function nextEventStatuses(status: ClubEventStatus): ClubEventStatus[] {
@@ -54,17 +60,13 @@ export function canTransitionEvent(from: ClubEventStatus, to: ClubEventStatus): 
   return nextEventStatuses(from).includes(to);
 }
 
-/** The label reads as what the button does, which depends on where it starts. */
-export function eventTransitionLabel(from: ClubEventStatus, to: ClubEventStatus): string {
-  if (to === "published") return "Publish";
-  if (to === "cancelled") return "Cancel";
-  return from === "cancelled" ? "Restore to draft" : "Unpublish";
+/** Only two moves exist, so the label is just which of them this is. */
+export function eventTransitionLabel(_from: ClubEventStatus, to: ClubEventStatus): string {
+  return to === "published" ? "Publish" : "Unpublish";
 }
 
-export function eventAuditAction(from: ClubEventStatus, to: ClubEventStatus): string {
-  if (to === "published") return "event.publish";
-  if (to === "cancelled") return "event.cancel";
-  return from === "cancelled" ? "event.restore" : "event.unpublish";
+export function eventAuditAction(_from: ClubEventStatus, to: ClubEventStatus): string {
+  return to === "published" ? "event.publish" : "event.unpublish";
 }
 
 /**
@@ -511,6 +513,21 @@ export async function updateEventStatus(id: string, status: ClubEventStatus): Pr
       where id = $1
       returning id`,
     [id, status],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Gone means gone. Safe to hard-delete because nothing references an event:
+ * no signups, no payments, no photos - the calendar reads the row directly, so
+ * removing it removes the event everywhere at once. The audit row written by
+ * the caller is the only trace kept, which is the right amount for a party
+ * that was called off.
+ */
+export async function deleteEvent(id: string): Promise<boolean> {
+  const rows = await execute<{ id: string }>(
+    `delete from events where id = $1 returning id`,
+    [id],
   );
   return rows.length > 0;
 }

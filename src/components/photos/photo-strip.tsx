@@ -37,17 +37,19 @@ export function PhotoStrip({
     <div
       role="img"
       aria-label={`${total} photo${total === 1 ? "" : "s"} from ${tripTitle}`}
-      className="group flex items-center gap-1.5"
+      className="group flex items-center"
     >
       {photos.map((photo, index) => (
         <span
           key={photo.id}
-          // The fan: hovering the strip splays the prints like a handful of
-          // photographs. Pure delight, so it is short, alternating, and gone
-          // entirely under reduced motion.
-          className={`block h-11 w-11 shrink-0 overflow-hidden rounded-md border border-border bg-surface transition-transform duration-200 [transition-timing-function:var(--ease-soft)] motion-reduce:transition-none motion-reduce:group-hover:rotate-0 motion-reduce:group-hover:translate-y-0 group-hover:-translate-y-0.5 ${
-            index % 2 === 0 ? "group-hover:-rotate-3" : "group-hover:rotate-3"
-          }`}
+          // A deck of prints: stacked with a sliver of each peeking out, the
+          // first on top. Hovering splays them back into a row - alternating
+          // tilt, like being handed the stack. The paper ring is what keeps
+          // the overlapped edges legible as separate photos.
+          style={{ zIndex: photos.length - index }}
+          className={`relative block h-11 w-11 shrink-0 overflow-hidden rounded-md border border-border bg-surface ring-2 ring-paper transition-[margin,transform] duration-200 [transition-timing-function:var(--ease-soft)] motion-reduce:transition-none motion-reduce:group-hover:rotate-0 motion-reduce:group-hover:translate-y-0 group-hover:-translate-y-0.5 ${
+            index > 0 ? "-ml-7 group-hover:ml-0.5" : ""
+          } ${index % 2 === 0 ? "group-hover:-rotate-3" : "group-hover:rotate-3"}`}
         >
           {photo.url ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -66,9 +68,12 @@ export function PhotoStrip({
       ))}
 
       {remaining > 0 ? (
+        // Beside the deck rather than in it: buried under the stack the count
+        // would clip to an unreadable sliver, and the number is the one part
+        // that must always read.
         <span
           aria-hidden="true"
-          className="tnum flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-xs font-medium text-ink-muted"
+          className="tnum ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-xs font-medium text-ink-muted"
         >
           +{remaining}
         </span>

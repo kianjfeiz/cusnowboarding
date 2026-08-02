@@ -95,9 +95,7 @@ export default async function Home() {
   return (
     <main className="mx-auto max-w-2xl px-5 py-12">
       <header className="mb-10">
-        <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-          This season.
-        </h1>
+        <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">Home</h1>
         <p className="mt-3 text-sm text-ink-muted">
           Trips, club events, and anything waiting on you.
         </p>

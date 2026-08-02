@@ -43,6 +43,13 @@ export type TripSummary = TripRow & {
   /** Holds whose deadline has already passed - a spot the board can reclaim. */
   lapsed: number;
   waitlisted: number;
+  /**
+   * Every signup row regardless of status, which the others deliberately are
+   * not - they filter to the live ones. This is the number that decides
+   * whether a trip may be deleted, because an expired or cancelled signup is
+   * still a person who entered and still a row a delete would take with it.
+   */
+  signups: number;
 };
 
 export interface Occupancy {
@@ -73,7 +80,8 @@ const TRIP_COUNTS = `
                          and s.payment_deadline_at > now() - ${HOLD_GRACE_INTERVAL})::int as held,
       count(*) filter (where s.status = 'held'
                          and s.payment_deadline_at <= now() - ${HOLD_GRACE_INTERVAL})::int as lapsed,
-      count(*) filter (where s.status = 'waitlisted')::int as waitlisted
+      count(*) filter (where s.status = 'waitlisted')::int as waitlisted,
+      count(*)::int as signups
     from signups s
     where s.trip_id = t.id
   ) c on true
@@ -81,7 +89,7 @@ const TRIP_COUNTS = `
 
 export async function listTrips(): Promise<TripSummary[]> {
   return execute<TripSummary>(
-    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted
+    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups
        from trips t
        ${TRIP_COUNTS}
       order by t.signup_opens_at desc`,
@@ -90,7 +98,7 @@ export async function listTrips(): Promise<TripSummary[]> {
 
 export async function getTripSummary(id: string): Promise<TripSummary | null> {
   const rows = await execute<TripSummary>(
-    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted
+    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups
        from trips t
        ${TRIP_COUNTS}
       where t.id = $1`,

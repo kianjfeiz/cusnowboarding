@@ -70,6 +70,9 @@ export async function startVerification(input: StartVerificationInput): Promise<
       firstName: input.firstName.trim(),
       lastName: input.lastName.trim(),
       phone: input.phone?.trim() || null,
+      // They typed this name themselves, which is all "confirmed" means. The
+      // welcome page after Google sign-in exists for members who never did.
+      nameConfirmedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: members.email,
@@ -77,6 +80,7 @@ export async function startVerification(input: StartVerificationInput): Promise<
         firstName: input.firstName.trim(),
         lastName: input.lastName.trim(),
         phone: sql`coalesce(${input.phone?.trim() || null}, ${members.phone})`,
+        nameConfirmedAt: new Date(),
         updatedAt: new Date(),
       },
     })

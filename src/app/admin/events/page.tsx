@@ -12,7 +12,7 @@ import {
   nextEventStatuses,
 } from "@/lib/events";
 import { requireActor } from "../_lib/actor";
-import { setEventStatus } from "./actions";
+import { deleteEventAction, setEventStatus } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -89,24 +89,33 @@ export default async function AdminEventsPage() {
                     </Td>
                     <Td>
                       <div className="flex justify-end gap-2">
-                        {mayManage
-                          ? nextEventStatuses(event.status).map((target) => (
+                        {mayManage ? (
+                          <>
+                            {nextEventStatuses(event.status).map((target) => (
                               <form key={target} action={setEventStatus}>
                                 <input type="hidden" name="eventId" value={event.id} />
                                 <input type="hidden" name="status" value={target} />
-                                <SubmitButton
-                                  variant={target === "cancelled" ? "danger" : "secondary"}
-                                  confirm={
-                                    target === "cancelled"
-                                      ? `Cancel "${event.title}"? It comes off the member calendar.`
-                                      : undefined
-                                  }
-                                >
+                                <SubmitButton variant="secondary">
                                   {eventTransitionLabel(event.status, target)}
                                 </SubmitButton>
                               </form>
-                            ))
-                          : null}
+                            ))}
+                            <form action={deleteEventAction}>
+                              <input type="hidden" name="eventId" value={event.id} />
+                              <SubmitButton
+                                variant="danger"
+                                pendingLabel="Deleting"
+                                confirm={
+                                  event.status === "published"
+                                    ? `Delete "${event.title}"? It is on the member calendar right now, and this cannot be undone.`
+                                    : `Delete "${event.title}"? This cannot be undone.`
+                                }
+                              >
+                                Delete
+                              </SubmitButton>
+                            </form>
+                          </>
+                        ) : null}
                       </div>
                     </Td>
                   </tr>

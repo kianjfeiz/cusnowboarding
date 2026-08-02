@@ -39,7 +39,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/login?error=no_member", request.url));
   }
 
-  const response = NextResponse.redirect(new URL(destination, request.url));
+  /*
+    First sign-in detour: someone who has never typed their own name gets the
+    welcome page before their destination. The claim cookie is still minted on
+    THIS response - arm stays the only place that mints it - so the welcome
+    page can identify the member from the cookie like any other page, and a
+    member who abandons the form is still armed for the next drop.
+  */
+  const destinationUrl =
+    member.nameConfirmedAt === null
+      ? new URL(`/welcome?next=${encodeURIComponent(destination)}`, request.url)
+      : new URL(destination, request.url);
+
+  const response = NextResponse.redirect(destinationUrl);
   response.cookies.set(
     MEMBER_COOKIE,
     await issueMemberToken({ memberId: member.id, tokenVersion: member.tokenVersion }),
