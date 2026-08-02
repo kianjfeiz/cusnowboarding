@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { Badge, Card, formatDenver, formatMoney } from "@/components/ui";
 import type { PaySignup } from "@/lib/payments";
@@ -6,6 +7,12 @@ import type { PaySignup } from "@/lib/payments";
  * The pay page and the bookmarkable status page show the same signup from two
  * angles, so the chrome and the trip summary live here rather than being
  * written twice and drifting apart.
+ *
+ * Both are usually arrived at from an email link rather than from inside the
+ * site, so they need the site header (provided by the `(site)` layout) and an
+ * explicit way out: landing on a payment handoff with no navigation leaves the
+ * member stuck on it. Everything here is behind sign-in, so the header always
+ * has a real session to render.
  */
 export function PageShell({
   title,
@@ -19,8 +26,15 @@ export function PageShell({
   return (
     <main className="mx-auto max-w-xl px-5 py-12">
       <header className="mb-8">
-        <p className="text-sm text-ink-muted">CU Snowboarding</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">{title}</h1>
+        {/* Back to the member's own trips rather than the trip page: this
+            signup is the subject, and /me is where their other ones are. */}
+        <Link
+          href="/me"
+          className="-my-2 inline-flex items-center gap-1.5 py-2 text-sm text-ink-muted transition-colors hover:text-ink"
+        >
+          <span aria-hidden="true">&larr;</span> My trips
+        </Link>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight">{title}</h1>
         {subtitle ? <p className="mt-2 text-sm text-ink-muted">{subtitle}</p> : null}
       </header>
       {children}

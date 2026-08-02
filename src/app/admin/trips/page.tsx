@@ -154,7 +154,7 @@ export default async function TripsPage() {
                           {mayManage ? (
                             <Link
                               href={`/admin/trips/${trip.id}/edit`}
-                              className="inline-flex h-8 items-center rounded-md px-3 text-xs font-medium text-ink-muted hover:bg-surface hover:text-ink"
+                              className="inline-flex h-10 items-center rounded-md px-3 text-xs font-medium text-ink-muted hover:bg-surface hover:text-ink sm:h-8"
                             >
                               Edit
                             </Link>

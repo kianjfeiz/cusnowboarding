@@ -129,7 +129,15 @@ Clean and restrained. Use only the semantic colors defined in
 `src/app/globals.css` (paper, surface, surface-strong, border, border-strong,
 ink, ink-muted, ink-faint, accent, accent-hover, accent-soft, alert, alert-soft).
 Reuse the primitives in `src/components/ui.tsx`. Status reads as words first,
-not color-coding. No gradients, no decorative animation.
+not color-coding.
+
+Motion is purposeful, never decorative: it marks arrival (the shared `rise`
+entrance, staggered at most 8 deep in lists), interaction (hover lifts, the
+150ms press scale on buttons), or live state (the signup pulse dot - the only
+looping animation allowed anywhere). Everything runs under half a second on
+`--ease-soft`, and everything collapses under `prefers-reduced-motion`. No
+gradients as decoration; the nav indicator's `.nav-glass` light model is the
+one standing exception.
 
 **No emojis anywhere** - not in UI copy, code, comments, or commit messages.
 

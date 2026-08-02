@@ -128,6 +128,50 @@ export async function presignRead(
   }
 }
 
+/**
+ * Like `presignRead`, but the object comes back as a file to save rather than
+ * something to render.
+ *
+ * The disposition is signed into the URL rather than set by the browser,
+ * because `<a download>` is ignored on a cross-origin URL - the attribute only
+ * works same-origin. Asking R2 to send `Content-Disposition: attachment` is
+ * what actually makes the browser save it, and it means the bytes still travel
+ * R2 to browser without passing through this app, exactly like uploads.
+ */
+export async function presignDownload(
+  storageKey: string,
+  filename: string,
+  expiresIn: number = READ_URL_TTL_SECONDS,
+): Promise<string | null> {
+  const s = await getStorage();
+  if (!s) return null;
+
+  const [{ GetObjectCommand }, { getSignedUrl }] = await Promise.all([
+    import("@aws-sdk/client-s3"),
+    import("@aws-sdk/s3-request-presigner"),
+  ]);
+
+  // Quotes and backslashes would end the filename token early; a header split
+  // on a newline is worse. Anything outside plain ASCII is dropped rather than
+  // encoded, and `filename*` is deliberately not used - the fallback name is
+  // only ever cosmetic.
+  const safe = filename.replace(/[^\x20-\x7e]/g, "").replace(/["\\]/g, "") || "photo";
+
+  try {
+    return await getSignedUrl(
+      s.client,
+      new GetObjectCommand({
+        Bucket: s.bucket,
+        Key: storageKey,
+        ResponseContentDisposition: `attachment; filename="${safe}"`,
+      }),
+      { expiresIn },
+    );
+  } catch {
+    return null;
+  }
+}
+
 export interface StoredObject {
   sizeBytes: number;
   contentType: string | null;

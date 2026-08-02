@@ -16,6 +16,9 @@ export interface CalendarItemView {
   kindLabel: string;
   /** "Fri, Jan 30" */
   dateLabel: string;
+  /** The same date split for the row list's calendar tile: "Jan" over "30". */
+  monthShort: string;
+  dayNum: string;
   /** "7:00 PM" or "All day" */
   timeLabel: string;
   /** The whole thing, spelled out for the dialog. */
@@ -100,6 +103,20 @@ export function toCalendarItemView(item: CalendarItem): CalendarItemView {
     title: item.title,
     kindLabel: item.kind === "trip" ? "Trip" : EVENT_KIND_LABELS[item.eventKind],
     dateLabel: formatDenver(item.startsAt, SHORT_DATE),
+    monthShort: formatDenver(item.startsAt, {
+      month: "short",
+      day: undefined,
+      hour: undefined,
+      minute: undefined,
+      timeZoneName: undefined,
+    }),
+    dayNum: formatDenver(item.startsAt, {
+      month: undefined,
+      day: "numeric",
+      hour: undefined,
+      minute: undefined,
+      timeZoneName: undefined,
+    }),
     timeLabel: allDay ? "All day" : formatDenver(item.startsAt, TIME_ONLY),
     whenLabel: whenLabel(item, allDay),
     description: item.description,

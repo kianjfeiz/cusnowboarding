@@ -25,16 +25,23 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     <div className="min-h-screen bg-surface">
       <header className="border-b border-border bg-paper">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3">
-          <Link href="/admin" className="text-sm font-semibold tracking-tight">
+          {/* Same hit-area trick as the member header: taller to the finger,
+              unchanged to the layout. */}
+          <Link href="/admin" className="-my-2 py-2 text-sm font-semibold tracking-tight">
             CU Snowboarding board
           </Link>
 
-          <nav className="flex items-center gap-1">
+          {/*
+            Six links do not fit a phone beside the wordmark. Rather than let
+            them squeeze until the labels wrap mid-word, the strip scrolls
+            sideways within itself and the page stays put.
+          */}
+          <nav className="-mx-1 flex w-full items-center gap-1 overflow-x-auto px-1 sm:mx-0 sm:w-auto sm:overflow-visible sm:px-0">
             {links.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
-                className="rounded-md px-2.5 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface hover:text-ink"
+                className="shrink-0 whitespace-nowrap rounded-md px-2.5 py-2 text-sm text-ink-muted transition-colors hover:bg-surface hover:text-ink"
               >
                 {link.label}
               </Link>
@@ -49,7 +56,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             */}
             <Link
               href="/"
-              className="rounded-md border border-border px-2 py-1 text-ink-muted transition-colors hover:bg-surface hover:text-ink"
+              className="inline-flex h-9 items-center rounded-md border border-border px-2.5 text-ink-muted transition-colors hover:bg-surface hover:text-ink sm:h-7 sm:px-2"
             >
               Member view
             </Link>
@@ -57,7 +64,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             <form action={signOutAction}>
               <button
                 type="submit"
-                className="rounded-md px-2 py-1 text-ink-muted transition-colors hover:bg-surface hover:text-ink"
+                className="inline-flex h-9 items-center rounded-md px-2.5 text-ink-muted transition-colors hover:bg-surface hover:text-ink sm:h-7 sm:px-2"
               >
                 Sign out
               </button>

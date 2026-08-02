@@ -62,6 +62,60 @@ body {
   color: var(--ink);
 }
 
+/*
+ * Motion. One easing and one entrance, shared by everything, so the whole site
+ * moves like one thing instead of a pile of components each with an opinion.
+ *
+ * The rules: motion marks arrival, hover, or a state change - it never loops
+ * for decoration (the only repeating animation anywhere is the live-status
+ * dot, which is information). Everything is under half a second, and all of it
+ * collapses under prefers-reduced-motion.
+ */
+:root {
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Stagger with `style={{ "--rise-delay": "90ms" }}` on the element. */
+.rise {
+  animation: rise-in 0.45s var(--ease-soft) both;
+  animation-delay: var(--rise-delay, 0ms);
+}
+
+/* The calendar panel and any other native dialog get the same arrival. */
+dialog[open] {
+  animation: rise-in 0.25s var(--ease-soft) both;
+}
+dialog::backdrop {
+  animation: backdrop-in 0.25s ease both;
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  dialog[open],
+  dialog::backdrop {
+    animation: none;
+  }
+}
+
 /* Countdowns and spot numbers use tabular figures so they do not jitter. */
 .tnum {
   font-variant-numeric: tabular-nums;
@@ -70,4 +124,107 @@ body {
 *:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/*
+ * The sliding nav indicator is the one element that is not a flat fill: it has
+ * to read as a lens of glass resting on the header. Three layers sell it -
+ * a translucent body that grades darker through the middle the way light falls
+ * off inside curved glass, an inset shadow stack acting as rim light (bright
+ * across the top where the light hits, faint along the sides and bottom where
+ * it wraps), and a `::before` specular sheen across the upper half. Kept here
+ * rather than in class strings because every layer changes with the colour
+ * scheme. The blur itself rides on Tailwind's `backdrop-*` utilities in
+ * NavStrip; a plain `backdrop-filter` declaration here does not survive the
+ * CSS build.
+ */
+.nav-glass {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--paper) 40%, transparent),
+    color-mix(in srgb, var(--surface-strong) 52%, transparent) 55%,
+    color-mix(in srgb, var(--surface) 34%, transparent)
+  );
+  border: 1px solid color-mix(in srgb, var(--border-strong) 40%, transparent);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.3),
+    inset 2px 0 2px -1px rgba(255, 255, 255, 0.45),
+    inset -2px 0 2px -1px rgba(255, 255, 255, 0.45),
+    0 1px 2px rgba(0, 0, 0, 0.07),
+    0 6px 14px -6px rgba(0, 0, 0, 0.16);
+}
+
+.nav-glass::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.55),
+    rgba(255, 255, 255, 0.08) 42%,
+    rgba(255, 255, 255, 0) 60%
+  );
+}
+
+@media (prefers-color-scheme: dark) {
+  /* On dark paper the frost has to lighten rather than tint - glass over a
+     dark surface catches light, so the body is built from white at low alpha
+     instead of the surface colours. */
+  .nav-glass {
+    background: linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.13),
+      rgba(255, 255, 255, 0.05) 55%,
+      rgba(255, 255, 255, 0.09)
+    );
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow:
+      inset 0 1px 1px rgba(255, 255, 255, 0.16),
+      inset 0 -1px 1px rgba(255, 255, 255, 0.05),
+      inset 2px 0 2px -1px rgba(255, 255, 255, 0.08),
+      inset -2px 0 2px -1px rgba(255, 255, 255, 0.08),
+      0 1px 2px rgba(0, 0, 0, 0.45),
+      0 6px 14px -6px rgba(0, 0, 0, 0.6);
+  }
+
+  .nav-glass::before {
+    background: linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.12),
+      rgba(255, 255, 255, 0.02) 42%,
+      rgba(255, 255, 255, 0) 60%
+    );
+  }
+}
+
+/*
+ * iOS Safari zooms the whole page in when a focused control's text is smaller
+ * than 16px, and does not zoom back out. On a drop night that is the difference
+ * between typing the phrase and fighting the viewport, so every control is
+ * given 16px on phones regardless of the Tailwind size class it carries.
+ *
+ * The min-height is the same argument for the finger rather than the eye: the
+ * admin forms are laid out at `h-8` for a desktop where thirty rows are on
+ * screen at once, which is well under a comfortable tap target.
+ *
+ * One rule rather than editing each class string: it catches controls added
+ * later, and the desktop sizing above the breakpoint is left exactly as
+ * designed. 640px is Tailwind's `sm`. Checkboxes and radios are excluded
+ * because their box is the control - stretching it would just misalign it from
+ * its label.
+ */
+@media (max-width: 639px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    min-height: 40px;
+  }
 }

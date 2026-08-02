@@ -2,15 +2,13 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { EmptyRow, PageHeader, Section, Stat, TableWrap, Td, Th } from "@/components/admin/shell";
 import { SubmitButton } from "@/components/admin/submit-button";
-import { Badge, Button, Input, Notice, formatDenver, formatMoney } from "@/components/ui";
+import { Badge, Button, Notice, formatDenver, formatMoney } from "@/components/ui";
 import { can } from "@/lib/authz";
 import { requireCapability } from "../_lib/actor";
 import {
   LINE_LIMIT,
   PAYMENT_FILTERS,
   PAYMENT_FILTER_LABELS,
-  PAYMENT_PROVIDERS,
-  PAYMENT_PROVIDER_LABELS,
   PAYMENT_STATE_LABELS,
   filterPaymentLines,
   getPaymentTotals,
@@ -30,6 +28,7 @@ import {
   reinstateSignupAction,
   sendUnpaidRemindersAction,
 } from "./actions";
+import { PaymentSourceFields } from "./payment-source-fields";
 import { MAX_BATCH, listUnpaidRecipients, type UnpaidRecipient } from "./unpaid";
 
 export const dynamic = "force-dynamic";
@@ -106,7 +105,7 @@ export default async function PaymentsPage({
           mayManage ? (
             <a
               href={csvHref}
-              className="inline-flex h-8 items-center rounded-md border border-border-strong px-3 text-xs font-medium hover:bg-surface"
+              className="inline-flex h-10 items-center rounded-md border border-border-strong px-3 text-xs font-medium hover:bg-surface sm:h-8"
             >
               Reconciliation CSV
             </a>
@@ -452,36 +451,30 @@ function PaymentRow({
         <Td>
           {owing ? (
             <details className="min-w-56">
-              <summary className="cursor-pointer text-xs text-accent underline underline-offset-4">
+              {/* Padding rather than a height: `summary` is a list-item, and
+                  changing its display to size it would drop the disclosure
+                  triangle. Vertical padding gives the phone a real tap target
+                  and leaves the desktop row height alone. */}
+              <summary className="cursor-pointer py-3 text-xs text-accent underline underline-offset-4 sm:py-0">
                 Record payment
               </summary>
               <form action={recordPaymentAction} className="mt-2 space-y-1.5">
                 <input type="hidden" name="signupId" value={line.signup_id} />
-                <ProviderSelect who={who} />
-                <Input
-                  name="reference"
-                  placeholder="Fusion transaction id"
-                  aria-label={`Reference for the payment from ${who}`}
-                  className="h-8 w-56 text-xs"
+                <PaymentSourceFields
+                  who={who}
+                  fusionNeedsReference
+                  submit={<SubmitButton pendingLabel="Saving">Record</SubmitButton>}
                 />
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    name="note"
-                    placeholder="Anything else worth recording"
-                    aria-label={`Note about the payment from ${who}`}
-                    className="h-8 w-44 text-xs"
-                  />
-                  <SubmitButton pendingLabel="Saving">Record</SubmitButton>
-                </div>
-                <p className="text-xs text-ink-faint">
-                  Fusion needs its transaction id. Anything else needs a reference or a note.
-                </p>
               </form>
             </details>
           ) : null}
           {canReinstate ? (
             <details className="min-w-56">
-              <summary className="cursor-pointer text-xs text-accent underline underline-offset-4">
+              {/* Padding rather than a height: `summary` is a list-item, and
+                  changing its display to size it would drop the disclosure
+                  triangle. Vertical padding gives the phone a real tap target
+                  and leaves the desktop row height alone. */}
+              <summary className="cursor-pointer py-3 text-xs text-accent underline underline-offset-4 sm:py-0">
                 Reinstate
               </summary>
               <form action={reinstateSignupAction} className="mt-2 space-y-1.5">
@@ -495,55 +488,25 @@ function PaymentRow({
                   />
                   <span>Money already received</span>
                 </label>
-                <ProviderSelect who={who} />
-                <Input
-                  name="reference"
-                  placeholder="Fusion transaction id"
-                  aria-label={`Reference for the payment from ${who}, if there is one`}
-                  className="h-8 w-56 text-xs"
+                <PaymentSourceFields
+                  who={who}
+                  fusionNeedsReference={false}
+                  submit={
+                    <SubmitButton
+                      pendingLabel="Reinstating"
+                      confirm={`Put ${who} back on ${line.trip_title}? They take the lowest free spot and are emailed.`}
+                    >
+                      Reinstate
+                    </SubmitButton>
+                  }
+                  hint="Leave the box clear to give them a fresh payment window; the payment fields are then ignored."
                 />
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    name="note"
-                    placeholder="Anything else worth recording"
-                    aria-label={`Note about the payment from ${who}, if there is one`}
-                    className="h-8 w-44 text-xs"
-                  />
-                  <SubmitButton
-                    pendingLabel="Reinstating"
-                    confirm={`Put ${who} back on ${line.trip_title}? They take the lowest free spot and are emailed.`}
-                  >
-                    Reinstate
-                  </SubmitButton>
-                </div>
-                <p className="text-xs text-ink-faint">
-                  Leave the box clear to give them a fresh payment window; the payment fields
-                  are then ignored.
-                </p>
               </form>
             </details>
           ) : null}
         </Td>
       ) : null}
     </tr>
-  );
-}
-
-/** Fusion is first and default: it is how the club is meant to bill. */
-function ProviderSelect({ who }: { who: string }) {
-  return (
-    <select
-      name="provider"
-      defaultValue="fusion"
-      aria-label={`How ${who} paid`}
-      className="h-8 w-56 rounded-md border border-border bg-paper px-2 text-xs text-ink focus:border-accent focus:outline-none"
-    >
-      {PAYMENT_PROVIDERS.map((provider) => (
-        <option key={provider} value={provider}>
-          {PAYMENT_PROVIDER_LABELS[provider]}
-        </option>
-      ))}
-    </select>
   );
 }
 

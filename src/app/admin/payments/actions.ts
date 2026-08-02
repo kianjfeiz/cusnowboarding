@@ -8,11 +8,12 @@ import { outstandingBalanceEmail, reinstatedEmail } from "@/lib/email/templates"
 import { reinstateSignup } from "@/lib/reinstate";
 import { requireCapability } from "../_lib/actor";
 import { recordAudit } from "../_lib/audit";
+import { paymentSummary } from "../_lib/payment-queries";
 import {
   parsePaymentProvider,
-  paymentSummary,
+  requiresReference,
   type PaymentProvider,
-} from "../_lib/payment-queries";
+} from "@/lib/payment-providers";
 import { MAX_BATCH, batchScopeKey, listUnpaidRecipients } from "./unpaid";
 
 function refresh(tripId: string | null): void {
@@ -59,7 +60,9 @@ export async function recordPayment(
   const reference = input.reference?.trim() || null;
   const note = input.note?.trim() || null;
 
-  if (provider === "fusion" && !reference) {
+  // Same predicate the treasurer's form labels itself from, so the field that
+  // renders as required and the field that is actually refused stay the same one.
+  if (requiresReference(provider) && !reference) {
     throw new Error("Record the Fusion transaction id so this can be reconciled later");
   }
   if (!reference && !note) {

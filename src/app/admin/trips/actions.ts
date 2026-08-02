@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { execute } from "@/lib/db";
 import type { TripStatus } from "@/lib/db/schema";
@@ -210,6 +210,8 @@ export async function createTrip(
 
   revalidatePath("/admin/trips");
   revalidatePath("/admin");
+  // The member-facing home list and calendar cache trip rows under this tag.
+  revalidateTag("trips");
   // Back to the list rather than the empty roster: the board's first question
   // after saving is "is it really on the schedule", and the list answers it.
   redirect("/admin/trips");
@@ -271,6 +273,7 @@ export async function updateTrip(
 
   revalidatePath("/admin/trips");
   revalidatePath(`/admin/trips/${tripId}`);
+  revalidateTag("trips");
   redirect(`/admin/trips/${tripId}`);
 }
 
@@ -307,4 +310,5 @@ export async function setTripStatus(formData: FormData): Promise<void> {
   revalidatePath("/admin/trips");
   revalidatePath(`/admin/trips/${tripId}`);
   revalidatePath("/admin");
+  revalidateTag("trips");
 }

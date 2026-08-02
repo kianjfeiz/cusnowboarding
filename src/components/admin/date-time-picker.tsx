@@ -159,14 +159,20 @@ export function DateTimePicker({
         )}
       </button>
 
+      {/*
+        The 18rem width is what the day grid wants; the clamp is what a small
+        phone allows. Without it the popover runs past the right edge on a 320px
+        screen and drags the whole page sideways with it - the field is already
+        inset by the page and card padding, so 18rem does not fit.
+      */}
       {open ? (
-        <div className="absolute left-0 top-11 z-20 w-72 rounded-lg border border-border-strong bg-paper p-3 shadow-lg">
+        <div className="absolute left-0 top-11 z-20 w-72 max-w-[calc(100vw-3.5rem)] rounded-lg border border-border-strong bg-paper p-3 shadow-lg">
           <div className="mb-2 flex items-center justify-between">
             <button
               type="button"
               onClick={() => shiftMonth(-1)}
               aria-label="Previous month"
-              className="h-7 w-7 rounded text-ink-muted hover:bg-surface hover:text-ink"
+              className="h-9 w-9 rounded text-ink-muted hover:bg-surface hover:text-ink sm:h-7 sm:w-7"
             >
               &lt;
             </button>
@@ -177,7 +183,7 @@ export function DateTimePicker({
               type="button"
               onClick={() => shiftMonth(1)}
               aria-label="Next month"
-              className="h-7 w-7 rounded text-ink-muted hover:bg-surface hover:text-ink"
+              className="h-9 w-9 rounded text-ink-muted hover:bg-surface hover:text-ink sm:h-7 sm:w-7"
             >
               &gt;
             </button>
@@ -198,7 +204,7 @@ export function DateTimePicker({
                   type="button"
                   onClick={() => pickDay(day)}
                   className={[
-                    "tnum h-8 rounded text-sm transition-colors",
+                    "tnum h-10 rounded text-sm transition-colors sm:h-8",
                     isPicked(day)
                       ? "bg-accent font-medium text-white"
                       : isToday(day)
@@ -226,7 +232,9 @@ export function DateTimePicker({
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="h-8 rounded-md bg-accent px-3 text-xs font-medium text-white hover:bg-accent-hover"
+              // Matches the time input beside it, which the phone rule in
+              // globals.css lifts to 40px.
+              className="h-10 rounded-md bg-accent px-3 text-xs font-medium text-white hover:bg-accent-hover sm:h-8"
             >
               Done
             </button>
@@ -236,7 +244,7 @@ export function DateTimePicker({
             <button
               type="button"
               onClick={() => setValue("")}
-              className="mt-2 w-full rounded py-1 text-xs text-ink-muted hover:bg-surface hover:text-ink"
+              className="mt-2 w-full rounded py-2.5 text-xs text-ink-muted hover:bg-surface hover:text-ink sm:py-1"
             >
               Clear
             </button>

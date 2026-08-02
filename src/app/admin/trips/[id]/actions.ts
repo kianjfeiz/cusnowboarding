@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { execute } from "@/lib/db";
 import { promoteFromWaitlist, renumberWaitlist, withTripLock } from "@/lib/promotion";
 import { releaseResults } from "@/lib/results";
@@ -155,6 +155,9 @@ function refreshTrip(tripId: string): void {
   revalidatePath(`/admin/trips/${tripId}`);
   revalidatePath("/admin/trips");
   revalidatePath("/admin");
+  // Roster and results changes touch the trips table too, and the shared
+  // member-facing caches key off this tag.
+  revalidateTag("trips");
 }
 
 /**

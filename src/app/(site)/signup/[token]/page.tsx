@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Notice, formatDenver, formatMoney } from "@/components/ui";
 import { loadPayState } from "@/lib/payments";
-import { PageShell, SummaryCard } from "../../pay/status";
+import { PageShell, SummaryCard } from "@/app/(site)/pay/status";
 
 export const dynamic = "force-dynamic";
 

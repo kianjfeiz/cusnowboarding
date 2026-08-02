@@ -9,8 +9,10 @@ export function Button({
   className,
   ...props
 }: ComponentProps<"button"> & { variant?: "primary" | "secondary" | "quiet" | "danger" }) {
+  // The press scale is the tactile half of every click; 150ms keeps it feeling
+  // like contact rather than animation.
   const base =
-    "inline-flex items-center justify-center rounded-md px-4 h-10 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none";
+    "inline-flex items-center justify-center rounded-md px-4 h-10 text-sm font-medium transition-[color,background-color,border-color,transform,box-shadow] duration-150 active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100 disabled:opacity-50 disabled:pointer-events-none";
   const variants = {
     primary: "bg-accent text-white hover:bg-accent-hover",
     secondary: "border border-border-strong bg-paper text-ink hover:bg-surface",

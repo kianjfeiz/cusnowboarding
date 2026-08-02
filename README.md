@@ -131,6 +131,66 @@ natively installed Postgres.
 
 ---
 
+## Trip photos (Cloudflare R2)
+
+Photos are optional. With no bucket configured the galleries show a "not set up
+yet" notice and everything else works, so this can wait until someone actually
+wants to post pictures.
+
+The bucket is **private and stays private**. Nothing in the app ever returns a
+public object URL: a trip's photos are visible only to people who were on that
+trip plus the board, and a permanent public URL cannot express that rule. Every
+read is a fresh 15-minute signature minted after the caller is checked against
+the roster.
+
+Set up, in the Cloudflare dashboard:
+
+1. **R2 → Create bucket.** Any name. Leave public access **off**, and do not
+   enable the `r2.dev` public URL.
+2. **R2 → Manage API tokens → Create token**, with *Object Read & Write*
+   scoped to that bucket. It shows the access key id and secret once.
+3. Copy the **Account ID** from the R2 overview page.
+4. Fill these into `.env.local`:
+
+   ```
+   R2_ACCOUNT_ID=
+   R2_ACCESS_KEY_ID=
+   R2_SECRET_ACCESS_KEY=
+   R2_BUCKET=
+   ```
+
+5. **Set the bucket's CORS policy.** The browser PUTs the file straight to R2 -
+   the bytes never pass through the Next.js server, because a serverless request
+   body is capped well below a modern phone photo. That upload is cross-origin,
+   so without CORS every upload fails while everything else looks fine:
+
+   ```json
+   [
+     {
+       "AllowedOrigins": ["http://localhost:3000", "https://YOUR-DOMAIN"],
+       "AllowedMethods": ["PUT"],
+       "AllowedHeaders": ["content-type"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+
+   Reading needs no CORS rule: galleries render signed URLs in `<img src>`,
+   which the browser does not treat as a cross-origin fetch.
+
+Then verify the whole round trip:
+
+```bash
+npm run storage:check
+```
+
+It presigns an upload, PUTs a small object, heads it, reads it back through a
+signed URL, checks the bucket refuses the *unsigned* URL, and deletes it. It
+cannot test CORS - it is not a browser, so R2 never applies a CORS rule to it. A
+green run here plus a failing upload in the app means step 5 is missing.
+
+---
+
 ## Tests
 
 ```bash

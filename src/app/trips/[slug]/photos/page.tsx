@@ -48,7 +48,7 @@ export default async function TripPhotosPage({
       <header className="mb-8">
         <Link
           href={`/trips/${trip.slug}`}
-          className="inline-flex items-center gap-1.5 text-sm text-ink-muted transition-colors hover:text-ink"
+          className="-my-2 inline-flex items-center gap-1.5 py-2 text-sm text-ink-muted transition-colors hover:text-ink"
         >
           <span aria-hidden="true">&larr;</span> {trip.title}
         </Link>

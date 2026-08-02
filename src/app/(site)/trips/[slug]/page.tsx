@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Badge, Card, Notice, formatDenver, formatMoney } from "@/components/ui";
 import { AvatarStack, Avatar } from "@/components/avatar";
-import { SiteHeader } from "@/components/site-header";
 import { getAttendeeFaces, isTripAttendee, listAttendees } from "@/lib/attendees";
 import { getMemberSession } from "@/lib/member-session";
 import { loadVerifiedMember } from "@/lib/verification";
@@ -25,38 +24,49 @@ export async function generateMetadata({
 
 export default async function TripPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const trip = await getTripBySlug(slug);
+
+  // The trip row and the member's identity do not depend on each other, and
+  // everything below needs at most those two, so the page is two database
+  // depths: (trip, member) then one parallel batch. Serial awaits here used to
+  // stack up to six round trips.
+  const [trip, member] = await Promise.all([
+    getTripBySlug(slug),
+    (async () => {
+      const session = await getMemberSession();
+      return session
+        ? loadVerifiedMember(session.memberId, session.tokenVersion)
+        : null;
+    })(),
+  ]);
 
   if (!trip || trip.status === "draft") notFound();
 
-  const session = await getMemberSession();
-  const member = session
-    ? await loadVerifiedMember(session.memberId, session.tokenVersion)
-    : null;
-
   const paymentLink = trip.paymentUrl || clubPaymentUrl();
 
-  const [occupancy, existingSignup] = await Promise.all([
-    getOccupancy(trip.id, trip.capacity),
-    member ? getMemberSignup(trip.id, member.id) : Promise.resolve(null),
-  ]);
-
-  const attendance = trip.rosterFinalizedAt ? await getAttendeeFaces(trip.id, 3) : null;
-  const attendees =
-    trip.rosterFinalizedAt && member && (await isTripAttendee(trip.id, member.id))
-      ? await listAttendees(trip.id)
-      : null;
+  const [occupancy, existingSignup, attendance, attendees, challenge] =
+    await Promise.all([
+      getOccupancy(trip.id, trip.capacity),
+      member ? getMemberSignup(trip.id, member.id) : null,
+      trip.rosterFinalizedAt ? getAttendeeFaces(trip.id, 3) : null,
+      trip.rosterFinalizedAt && member
+        ? isTripAttendee(trip.id, member.id).then((went) =>
+            went ? listAttendees(trip.id) : null,
+          )
+        : null,
+      // Issued at render so that at 8:00:00 the client already holds it and
+      // entering costs no extra round trip. An HMAC sign, so issuing it even
+      // when an existing signup will win the render below costs nothing.
+      member ? issueChallenge(trip.id, member.id) : null,
+    ]);
 
   return (
-    <>
-      <SiteHeader />
-      <main className="mx-auto max-w-2xl px-5 py-12">
+    <main className="mx-auto max-w-2xl px-5 py-12">
       <header className="mb-8">
         <Link
           href="/"
-          className="inline-flex items-center gap-1.5 text-sm text-ink-muted transition-colors hover:text-ink"
+          className="-my-2 inline-flex items-center gap-1.5 py-2 text-sm text-ink-muted transition-colors hover:text-ink"
         >
-          <span aria-hidden="true">&larr;</span> All trips
+          <span aria-hidden="true">&larr;</span> Home
         </Link>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight">{trip.title}</h1>
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -141,9 +151,7 @@ export default async function TripPage({ params }: { params: Promise<{ slug: str
           // has to say the board has not closed or cancelled it. The countdown
           // decides the rest, and the claim re-checks the clock server-side.
           isOpenStatus={trip.status === "scheduled" || trip.status === "open"}
-          // Issued at render so that at 8:00:00 the client already holds it and
-          // entering costs no extra round trip.
-          challenge={member ? await issueChallenge(trip.id, member.id) : null}
+          challenge={challenge}
         />
       )}
 
@@ -178,7 +186,7 @@ export default async function TripPage({ params }: { params: Promise<{ slug: str
             </h2>
             <Link
               href={`/trips/${trip.slug}/photos`}
-              className="text-sm text-accent underline underline-offset-4"
+              className="-my-2 py-2 text-sm text-accent underline underline-offset-4"
             >
               Photos
             </Link>
@@ -205,8 +213,7 @@ export default async function TripPage({ params }: { params: Promise<{ slug: str
           </div>
         </Card>
       ) : null}
-      </main>
-    </>
+    </main>
   );
 }
 

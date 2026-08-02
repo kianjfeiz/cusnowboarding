@@ -11,6 +11,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "db:seed": "tsx src/lib/db/seed.ts",
+    "storage:check": "tsx scripts/check-photo-storage.ts",
     "db:studio": "drizzle-kit studio",
     "db:up": "docker compose up -d && tsx scripts/wait-for-db.ts",
     "db:down": "docker compose down -v",

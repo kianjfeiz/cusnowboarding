@@ -110,27 +110,25 @@ export function resolveTripId(
 // ---------------------------------------------------------------------------
 
 /**
- * The `provider` column is plain text, so this list is the only thing keeping it
- * to a set worth grouping by. `fusion` is the default because it is how the club
- * is supposed to bill; the rest exist because members hand over cash at meetings
- * and the treasurer still has to be able to say so.
+ * The provider vocabulary lives in `@/lib/payment-providers` because the
+ * treasurer's form is a client component and cannot import this file - every
+ * read model here pulls in the database. Re-exported so callers that already
+ * think of providers as part of the payments read model keep working.
  */
-export const PAYMENT_PROVIDERS = ["fusion", "venmo", "cash", "check", "other"] as const;
+export {
+  PAYMENT_PROVIDERS,
+  PAYMENT_PROVIDER_LABELS,
+  parsePaymentProvider,
+  requiresReference,
+  type PaymentProvider,
+} from "@/lib/payment-providers";
 
-export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
-
-export const PAYMENT_PROVIDER_LABELS: Record<PaymentProvider, string> = {
-  fusion: "Fusion",
-  venmo: "Venmo",
-  cash: "Cash",
-  check: "Check",
-  other: "Other",
-};
-
-export function parsePaymentProvider(raw: string | null | undefined): PaymentProvider {
-  const found = PAYMENT_PROVIDERS.find((value) => value === raw);
-  return found ?? "fusion";
-}
+// Re-exporting does not bind these locally; the read models below use them.
+import {
+  PAYMENT_PROVIDER_LABELS,
+  parsePaymentProvider,
+  type PaymentProvider,
+} from "@/lib/payment-providers";
 
 /**
  * One line saying where the money came from, written to `signups.offline_note`

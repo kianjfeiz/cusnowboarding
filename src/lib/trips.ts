@@ -1,6 +1,8 @@
-import { eq } from "drizzle-orm";
+import { cache } from "react";
+import { unstable_cache } from "next/cache";
+import { desc, eq, inArray } from "drizzle-orm";
 import { db, execute } from "@/lib/db";
-import { trips, type Trip } from "@/lib/db/schema";
+import { trips, type Trip, type TripStatus } from "@/lib/db/schema";
 import { HOLD_OCCUPIES_SQL } from "@/lib/holds";
 
 export interface Occupancy {
@@ -46,10 +48,76 @@ export async function getOccupancy(tripId: string, capacity: number): Promise<Oc
   return { taken, paid, held, waitlisted, free: Math.max(0, capacity - taken) };
 }
 
-export async function getTripBySlug(slug: string): Promise<Trip | null> {
+/** Exactly what the home page's trip list renders, and nothing member-specific. */
+export interface UpcomingTripRow {
+  id: string;
+  slug: string;
+  title: string;
+  resort: string | null;
+  status: TripStatus;
+  priceCents: number;
+  capacity: number;
+  departAt: Date;
+  signupOpensAt: Date;
+  signupClosesAt: Date | null;
+}
+
+const listUpcomingTripsCached = unstable_cache(
+  async () =>
+    db
+      .select({
+        id: trips.id,
+        slug: trips.slug,
+        title: trips.title,
+        resort: trips.resort,
+        status: trips.status,
+        priceCents: trips.priceCents,
+        capacity: trips.capacity,
+        departAt: trips.departAt,
+        signupOpensAt: trips.signupOpensAt,
+        signupClosesAt: trips.signupClosesAt,
+      })
+      .from(trips)
+      .where(inArray(trips.status, ["scheduled", "open", "closed"]))
+      .orderBy(desc(trips.signupOpensAt))
+      .limit(20),
+  ["upcoming-trips"],
+  { tags: ["trips"], revalidate: 300 },
+);
+
+/**
+ * The public trip list, cached across requests and users.
+ *
+ * Safe to share because every column here is the same for everyone, and the
+ * time-sensitive parts of the display ("signups open now") are computed from
+ * these timestamps at render, not stored. The board's trip mutations
+ * revalidate the `trips` tag, so edits show up immediately; the five-minute
+ * revalidate is only a backstop for any write path the tag misses.
+ *
+ * Occupancy, signups, and anything member-specific stay uncached on purpose.
+ *
+ * The map on the way out is not decorative: `unstable_cache` stores JSON, so
+ * on a cache hit the timestamps arrive as ISO strings wearing `Date` types.
+ */
+export async function listUpcomingTrips(): Promise<UpcomingTripRow[]> {
+  const rows = await listUpcomingTripsCached();
+  return rows.map((row) => ({
+    ...row,
+    departAt: new Date(row.departAt),
+    signupOpensAt: new Date(row.signupOpensAt),
+    signupClosesAt: row.signupClosesAt ? new Date(row.signupClosesAt) : null,
+  }));
+}
+
+/**
+ * `cache()` because `generateMetadata` and the page body both ask for the trip
+ * on every visit; deduping turns those two identical queries into one. The
+ * scope is a single request, so nothing here outlives or crosses a render.
+ */
+export const getTripBySlug = cache(async (slug: string): Promise<Trip | null> => {
   const [trip] = await db.select().from(trips).where(eq(trips.slug, slug)).limit(1);
   return trip ?? null;
-}
+});
 
 export interface MemberSignupView {
   status: string;

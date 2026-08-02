@@ -72,7 +72,12 @@ export function CalendarEntry({
         className={
           variant === "cell"
             ? "block w-full rounded px-1 py-0.5 text-left text-xs text-ink transition-colors hover:bg-surface-strong"
-            : "flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md border border-border bg-paper px-4 py-3 text-left transition-colors hover:border-border-strong"
+            : cn(
+                "group flex w-full items-center gap-4 rounded-lg border border-border bg-paper px-4 py-3 text-left",
+                "transition-[border-color,transform,box-shadow] duration-200 [transition-timing-function:var(--ease-soft)]",
+                "hover:-translate-y-0.5 hover:border-border-strong hover:shadow-sm",
+                "motion-reduce:transition-none motion-reduce:hover:translate-y-0",
+              )
         }
       >
         {variant === "cell" ? (
@@ -82,7 +87,16 @@ export function CalendarEntry({
           </>
         ) : (
           <>
-            <span className="tnum w-28 shrink-0 text-sm text-ink-muted">{item.dateLabel}</span>
+            {/* A tear-off-calendar tile: the date is the first thing a member
+                scans a list of events for, so it gets the shape of a date. */}
+            <span className="flex w-12 shrink-0 flex-col items-center rounded-md border border-border bg-surface py-1.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+                {item.monthShort}
+              </span>
+              <span className="tnum text-lg font-semibold leading-tight text-ink">
+                {item.dayNum}
+              </span>
+            </span>
             <span className="min-w-0 flex-1">
               <span className="block font-medium text-ink">{item.title}</span>
               <span className="mt-0.5 block text-sm text-ink-muted">
@@ -91,6 +105,15 @@ export function CalendarEntry({
               </span>
             </span>
             <Badge emphasis="muted">{item.kindLabel}</Badge>
+            {/* Slides in on hover: the row's answer to "can I do something
+                here". Hidden from screen readers - the row is already a
+                button. */}
+            <span
+              aria-hidden="true"
+              className="-translate-x-1 text-ink-faint opacity-0 transition-[transform,opacity] duration-200 group-hover:translate-x-0 group-hover:opacity-100 motion-reduce:transition-none"
+            >
+              &rarr;
+            </span>
           </>
         )}
       </button>

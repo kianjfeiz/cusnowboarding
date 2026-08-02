@@ -94,21 +94,21 @@ export default async function AdminDashboard() {
           <p className="text-xs uppercase tracking-wide text-ink-faint">Outstanding</p>
           <p className="tnum mt-2 text-lg font-semibold">{formatMoney(outstanding)}</p>
           <p className="mt-1 text-sm text-ink-muted">
-            {unsettled === 0 ? (
-              "Every spot on a live trip is settled."
-            ) : (
-              <>
-                {unsettled} spot{unsettled === 1 ? "" : "s"} unsettled.{" "}
-                <Link
-                  href="/admin/payments"
-                  className="text-accent underline underline-offset-4"
-                >
-                  Record a payment
-                </Link>
-                .
-              </>
-            )}
+            {unsettled === 0
+              ? "Every spot on a live trip is settled."
+              : `${unsettled} spot${unsettled === 1 ? "" : "s"} unsettled.`}
           </p>
+          {/* Named by the list rather than the action: a treasurer looking at a
+              balance wants to know who it is before deciding to record
+              anything, and recording happens on that page regardless. The
+              filter is stated rather than left to the payments page default, so
+              changing that default cannot silently repoint this. */}
+          <Link
+            href="/admin/payments?status=owing"
+            className="mt-3 inline-flex h-10 items-center rounded-md border border-border-strong px-3 text-xs font-medium hover:bg-surface sm:h-8"
+          >
+            {unsettled === 0 ? "Open payments" : "See who owes"}
+          </Link>
         </Card>
       </div>
 

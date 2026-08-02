@@ -87,6 +87,25 @@ export function RosterBoard({
     !sameOrder(lists.waitlisted, baseline.waitlisted);
   const over = lists.onTrip.length - capacity;
 
+  /**
+   * The action bar is pinned so Save stays reachable from anywhere in a
+   * thirty-card list. On a phone the full sentence wraps to three lines, and a
+   * bar that tall covers the roster it is pinned over - so the phone gets a
+   * shorter form of the same status. The pair is written here, together, so the
+   * two wordings cannot drift apart.
+   */
+  const status = dirty
+    ? {
+        short: "Unsaved changes",
+        full: "Unsaved changes. Nothing has been written and nobody has been told anything.",
+      }
+    : sendAction
+      ? {
+          short: "Saved. Nobody told yet.",
+          full: "The list is saved. Nobody has been told anything yet.",
+        }
+      : { short: "No changes", full: "No changes since the last save." };
+
   function announce(message: string) {
     setAnnouncement(message);
     setResult(null);
@@ -316,11 +335,8 @@ export function RosterBoard({
 
       <div className="sticky bottom-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3">
         <p className="text-sm text-ink-muted">
-          {dirty
-            ? "Unsaved changes. Nothing has been written and nobody has been told anything."
-            : sendAction
-              ? "The list is saved. Nobody has been told anything yet."
-              : "No changes since the last save."}
+          <span className="sm:hidden">{status.short}</span>
+          <span className="hidden sm:inline">{status.full}</span>
         </p>
         <div className="flex gap-2">
           {dirty ? (
@@ -382,7 +398,10 @@ function Small({
       disabled={disabled}
       title={title}
       aria-label={label}
-      className="h-7 px-2 text-xs"
+      // Curating is a phone job, and these are the touch path off the drag
+      // gesture, so they get a real tap target there and stay compact on a
+      // desktop where thirty of them are on screen at once.
+      className="h-9 px-3 text-xs sm:h-7 sm:px-2"
     >
       {children}
     </Button>

@@ -206,7 +206,10 @@ export function TripForm({
         <Button type="submit" disabled={pending}>
           {pending ? "Saving" : submitLabel}
         </Button>
-        <Link href={cancelHref} className="text-sm text-ink-muted underline underline-offset-4">
+        <Link
+          href={cancelHref}
+          className="inline-flex h-10 items-center text-sm text-ink-muted underline underline-offset-4"
+        >
           Cancel
         </Link>
       </div>

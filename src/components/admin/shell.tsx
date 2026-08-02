@@ -19,7 +19,9 @@ export function PageHeader({
         {back ? (
           <Link
             href={back.href}
-            className="text-xs text-ink-muted underline underline-offset-4 hover:text-ink"
+            // Vertical padding on an inline link grows the tap target without
+            // taking any extra height in the header.
+            className="py-2 text-xs text-ink-muted underline underline-offset-4 hover:text-ink"
           >
             {back.label}
           </Link>

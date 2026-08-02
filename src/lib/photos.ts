@@ -5,6 +5,7 @@ import {
   deleteObject,
   headObject,
   isPhotoStorageConfigured,
+  presignDownload,
   presignRead,
   presignUpload,
 } from "@/lib/storage/r2";
@@ -199,6 +200,112 @@ export async function countTripPhotos(tripId: string): Promise<number> {
     [tripId],
   );
   return rows[0]?.n ?? 0;
+}
+
+/**
+ * A URL that saves one photo to disk, or null if this viewer may not have it.
+ *
+ * Authorised per photo at the moment of the request rather than by handing the
+ * gallery a second signed URL for every tile up front: a member downloading two
+ * of forty should not have cost forty extra signatures, and a URL that was
+ * minted on page load is a URL that has been sitting in the DOM since.
+ *
+ * The entitlement is the trip's, not the photo's - the rule has always been
+ * "were you on this trip", and a photo carries no separate audience.
+ */
+export async function getPhotoDownload(
+  photoId: string,
+  viewer: PhotoViewer,
+): Promise<{ url: string; filename: string } | null> {
+  const rows = await execute<{
+    trip_id: string;
+    storage_key: string;
+    content_type: string;
+    original_filename: string | null;
+  }>(
+    `select trip_id, storage_key, content_type, original_filename
+       from trip_photos
+      where id = $1 and status = 'ready'`,
+    [photoId],
+  );
+
+  const photo = rows[0];
+  if (!photo) return null;
+  if (!(await canViewerSeeTripPhotos(viewer, photo.trip_id))) return null;
+
+  // Phones upload as IMG_0001.HEIC and browsers save whatever the header says,
+  // so the uploader's own name is the only one that means anything to them. The
+  // id is the fallback because it is the one thing guaranteed unique - a folder
+  // of forty "photo.jpg" is worse than a folder of forty ids.
+  const extension = isAllowedContentType(photo.content_type)
+    ? EXTENSIONS[photo.content_type]
+    : "jpg";
+  const filename = photo.original_filename?.trim() || `${photoId}.${extension}`;
+
+  const url = await presignDownload(photo.storage_key, filename);
+  return url ? { url, filename } : null;
+}
+
+export interface TripPhotoPreview {
+  /** Signed thumbnails, in gallery order, capped at the requested limit. */
+  photos: Array<{ id: string; url: string | null; alt: string }>;
+  /** Every ready photo on the trip, so a card can say how many it is not showing. */
+  total: number;
+}
+
+/**
+ * A few photos and a count, for a card that wants to show a trip has pictures
+ * without opening the gallery.
+ *
+ * Two things differ from `listTripPhotos`, both deliberately:
+ *
+ * It returns null instead of throwing when the viewer is not entitled. A card
+ * that throws takes the whole page with it, and the caller still needs to tell
+ * "not yours" from "yours, but empty" - the first hides the row, the second
+ * invites an upload. That is why this is null rather than an empty preview. The
+ * access check itself is unchanged and still happens here, in the domain layer,
+ * like every other read in this file.
+ *
+ * And it signs only what it returns. A member on six finalised trips would
+ * otherwise pay for a signature on every photo of every gallery to render one
+ * row of thumbnails.
+ */
+export async function getTripPhotoPreview(
+  tripId: string,
+  viewer: PhotoViewer,
+  limit = 4,
+): Promise<TripPhotoPreview | null> {
+  if (!(await canViewerSeeTripPhotos(viewer, tripId))) return null;
+
+  const rows = await execute<{
+    id: string;
+    storage_key: string;
+    caption: string | null;
+    uploader_name: string;
+    total: number;
+  }>(
+    // The window count is evaluated before the limit, so it reports every ready
+    // photo on the trip rather than the handful this query returns.
+    `select p.id, p.storage_key, p.caption,
+            m.first_name || ' ' || m.last_name as uploader_name,
+            (count(*) over ())::int as total
+       from trip_photos p
+       join members m on m.id = p.uploader_member_id
+      where p.trip_id = $1 and p.status = 'ready'
+      order by p.taken_at, p.created_at
+      limit $2`,
+    [tripId, limit],
+  );
+
+  const photos = await Promise.all(
+    rows.map(async (row) => ({
+      id: row.id,
+      url: await presignRead(row.storage_key),
+      alt: row.caption ?? `Photo by ${row.uploader_name}`,
+    })),
+  );
+
+  return { photos, total: rows[0]?.total ?? 0 };
 }
 
 // ---------------------------------------------------------------------------

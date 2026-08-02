@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { execute } from "@/lib/db";
 import { eventKind, eventStatus, type TripStatus } from "@/lib/db/schema";
@@ -203,6 +204,38 @@ export async function listCalendarItems(range: CalendarRange): Promise<CalendarI
   ];
 
   return sortCalendarItems(items);
+}
+
+const listCalendarItemsCached = unstable_cache(
+  async (fromIso: string, toIso: string) =>
+    listCalendarItems({ from: new Date(fromIso), to: new Date(toIso) }),
+  ["calendar-items"],
+  { tags: ["trips", "events"], revalidate: 300 },
+);
+
+/**
+ * `listCalendarItems`, cached across requests and users - published events and
+ * public trip rows are the same feed for everyone. Board mutations revalidate
+ * the `trips` and `events` tags; the revalidate window is a backstop.
+ *
+ * Only useful for ranges whose boundaries repeat between requests (the month
+ * grid). A now-anchored range like the upcoming list changes key every call
+ * and would turn the cache into a write-only log - keep using the uncached
+ * read for those.
+ *
+ * The map on the way out revives what the JSON round trip flattened: on a
+ * cache hit `startsAt`/`endsAt` arrive as ISO strings wearing `Date` types.
+ */
+export async function listCalendarItemsShared(range: CalendarRange): Promise<CalendarItem[]> {
+  const items = await listCalendarItemsCached(
+    range.from.toISOString(),
+    range.to.toISOString(),
+  );
+  return items.map((item) => ({
+    ...item,
+    startsAt: new Date(item.startsAt),
+    endsAt: item.endsAt ? new Date(item.endsAt) : null,
+  }));
 }
 
 /** Title breaks the tie so two things at 7pm do not swap places between loads. */

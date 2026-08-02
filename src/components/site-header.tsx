@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { auth, signIn, signOut } from "@/auth";
 import { Avatar } from "@/components/avatar";
+import { NavStrip, type NavItem } from "@/components/nav-strip";
 
 /**
  * Member-facing navigation. The board has its own shell under /admin; this is
@@ -10,43 +11,25 @@ export async function SiteHeader() {
   const session = await auth();
   const user = session?.user;
 
+  const navItems: NavItem[] = [
+    // Trip pages are reached from the Home list, so Home stays lit there.
+    { href: "/", label: "Home", covers: ["/trips"] },
+    { href: "/calendar", label: "Calendar" },
+    ...(user ? [{ href: "/me", label: "My trips" }] : []),
+    ...(user?.boardUserId ? [{ href: "/admin", label: "Board" }] : []),
+  ];
+
   return (
     <header className="border-b border-border bg-paper">
       <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3">
-        <Link href="/" className="text-sm font-semibold tracking-tight">
+        {/* `-my-2 py-2` buys the wordmark a finger-sized hit area without
+            adding any height to the header row. */}
+        <Link href="/" className="-my-2 py-2 text-sm font-semibold tracking-tight">
           CU Snowboarding
         </Link>
 
-        <nav className="flex items-center gap-1">
-          <Link
-            href="/"
-            className="rounded-md px-2.5 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface hover:text-ink"
-          >
-            Trips
-          </Link>
-          <Link
-            href="/calendar"
-            className="rounded-md px-2.5 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface hover:text-ink"
-          >
-            Calendar
-          </Link>
-          {user ? (
-            <Link
-              href="/me"
-              className="rounded-md px-2.5 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface hover:text-ink"
-            >
-              My trips
-            </Link>
-          ) : null}
-          {user?.boardUserId ? (
-            <Link
-              href="/admin"
-              className="rounded-md px-2.5 py-1.5 text-sm text-ink-muted transition-colors hover:bg-surface hover:text-ink"
-            >
-              Board
-            </Link>
-          ) : null}
-        </nav>
+        {/* Same reasoning as the board header: the strip scrolls, not the page. */}
+        <NavStrip items={navItems} />
 
         <div className="ml-auto flex items-center gap-3">
           {user ? (
@@ -64,7 +47,7 @@ export async function SiteHeader() {
               >
                 <button
                   type="submit"
-                  className="rounded-md px-2 py-1 text-xs text-ink-muted transition-colors hover:bg-surface hover:text-ink"
+                  className="inline-flex h-9 items-center rounded-md px-2.5 text-xs text-ink-muted transition-colors hover:bg-surface hover:text-ink sm:h-7 sm:px-2"
                 >
                   Sign out
                 </button>
@@ -81,7 +64,7 @@ export async function SiteHeader() {
             >
               <button
                 type="submit"
-                className="rounded-md border border-border-strong px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface"
+                className="inline-flex h-9 items-center rounded-md border border-border-strong px-3 text-xs font-medium transition-colors hover:bg-surface sm:h-8"
               >
                 Sign in with Google
               </button>
