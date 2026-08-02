@@ -15,7 +15,17 @@ export async function SiteHeader() {
     // Trip pages are reached from the Home list, so Home stays lit there.
     { href: "/", label: "Home", covers: ["/trips"] },
     { href: "/calendar", label: "Calendar" },
-    ...(user ? [{ href: "/me", label: "My trips" }] : []),
+    ...(user
+      ? [
+          {
+            href: "/me",
+            label: "My trips",
+            // All only ever reached from My trips, and the longer claims
+            // outrank Home's blanket hold on /trips.
+            covers: ["/trips/*/roster", "/trips/*/rides", "/pay"],
+          },
+        ]
+      : []),
     ...(user?.boardUserId ? [{ href: "/admin", label: "Board" }] : []),
   ];
 

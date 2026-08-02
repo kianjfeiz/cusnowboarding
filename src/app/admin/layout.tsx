@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { NavStrip, type NavItem } from "@/components/nav-strip";
 import { can } from "@/lib/authz";
 import { requireActor } from "./_lib/actor";
 import { signOutAction } from "./_lib/session-actions";
@@ -12,8 +13,9 @@ export const metadata: Metadata = { title: "Board - CU Snowboarding" };
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const actor = await requireActor();
 
-  const links: Array<{ href: string; label: string }> = [
-    { href: "/admin", label: "Dashboard" },
+  const links: NavItem[] = [
+    // Exact, or the dashboard would stay lit on every board page it prefixes.
+    { href: "/admin", label: "Dashboard", exact: true },
     { href: "/admin/trips", label: "Trips" },
     { href: "/admin/events", label: "Events" },
     { href: "/admin/payments", label: "Payments" },
@@ -31,22 +33,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             CU Snowboarding board
           </Link>
 
-          {/*
-            Six links do not fit a phone beside the wordmark. Rather than let
-            them squeeze until the labels wrap mid-word, the strip scrolls
-            sideways within itself and the page stays put.
-          */}
-          <nav className="-mx-1 flex w-full items-center gap-1 overflow-x-auto px-1 sm:mx-0 sm:w-auto sm:overflow-visible sm:px-0">
-            {links.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="shrink-0 whitespace-nowrap rounded-md px-2.5 py-2 text-sm text-ink-muted transition-colors hover:bg-surface hover:text-ink"
-              >
-                {link.label}
-              </Link>
-            ))}
-          </nav>
+          {/* The same glass strip as the member site, so moving between the
+              two halves feels like one product. This layout persists across
+              admin navigations, which is what the indicator slides on. */}
+          <NavStrip items={links} />
 
           <div className="ml-auto flex items-center gap-3 text-xs text-ink-faint">
             {/*

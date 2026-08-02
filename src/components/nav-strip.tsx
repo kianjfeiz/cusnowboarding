@@ -5,10 +5,17 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 /**
- * `covers` lists route prefixes that belong to this tab without being under its
- * href - trip detail pages are reached from Home, so Home claims them.
+ * `covers` lists route patterns that belong to this tab without being under its
+ * href - trip detail pages are reached from Home, so Home claims them. A `*`
+ * segment matches exactly one path segment, so "/trips/*\/roster" can hand the
+ * roster page to My trips while the trip page under the same slug stays with
+ * Home. Patterns must stay strings: this crosses the RSC boundary, where a
+ * RegExp cannot.
+ *
+ * `exact` is for hub pages that are also prefixes of everything beside them -
+ * without it, /admin would stay lit on every board page.
  */
-export type NavItem = { href: string; label: string; covers?: string[] };
+export type NavItem = { href: string; label: string; covers?: string[]; exact?: boolean };
 
 type Geometry = { left: number; right: number; trackWidth: number };
 
@@ -32,14 +39,48 @@ const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : us
  */
 let lastGeometry: Geometry | null = null;
 
-function matchesPrefix(pathname: string, prefix: string) {
-  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+/** Prefix match by whole segments, where a `*` pattern segment matches any one. */
+function matchesPattern(pathname: string, pattern: string) {
+  const path = pathname.split("/").filter(Boolean);
+  const wanted = pattern.split("/").filter(Boolean);
+  if (path.length < wanted.length) return false;
+  return wanted.every((segment, i) => segment === "*" || segment === path[i]);
 }
 
-function isActive(pathname: string, item: NavItem) {
-  if (item.covers?.some((prefix) => matchesPrefix(pathname, prefix))) return true;
-  if (item.href === "/") return pathname === "/";
-  return matchesPrefix(pathname, item.href);
+/**
+ * How strongly this tab claims the pathname: the segment count of its longest
+ * matching pattern, or -1 for no claim. Longest wins so that a specific claim
+ * ("/trips/*\/roster" is My trips) beats a broad one ("/trips" is Home)
+ * regardless of which tab is listed first.
+ */
+function claimStrength(pathname: string, item: NavItem): number {
+  const segments = (value: string) => value.split("/").filter(Boolean).length;
+  let strength = -1;
+
+  for (const pattern of item.covers ?? []) {
+    if (matchesPattern(pathname, pattern)) strength = Math.max(strength, segments(pattern));
+  }
+
+  if (item.exact || item.href === "/") {
+    if (pathname === item.href) strength = Math.max(strength, segments(item.href));
+  } else if (matchesPattern(pathname, item.href)) {
+    strength = Math.max(strength, segments(item.href));
+  }
+
+  return strength;
+}
+
+function activeIndexFor(pathname: string, items: NavItem[]): number {
+  let best = -1;
+  let bestStrength = -1;
+  items.forEach((item, index) => {
+    const strength = claimStrength(pathname, item);
+    if (strength > bestStrength) {
+      best = index;
+      bestStrength = strength;
+    }
+  });
+  return bestStrength < 0 ? -1 : best;
 }
 
 /**
@@ -65,7 +106,7 @@ export function NavStrip({ items }: { items: NavItem[] }) {
   const pillRef = useRef<HTMLSpanElement>(null);
   const linkRefs = useRef<(HTMLAnchorElement | null)[]>([]);
 
-  const activeIndex = items.findIndex((item) => isActive(pathname, item));
+  const activeIndex = activeIndexFor(pathname, items);
 
   const readGeometry = useCallback((): Geometry | null => {
     const track = trackRef.current;

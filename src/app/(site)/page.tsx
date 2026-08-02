@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { auth } from "@/auth";
 import { listUpcomingTrips } from "@/lib/trips";
 import { Badge, Card, formatDenver, formatMoney } from "@/components/ui";
+import { CountdownChip } from "@/components/countdown-chip";
 import { UpcomingList } from "@/components/calendar/upcoming-list";
 import { toCalendarItemViews } from "@/components/calendar/view";
 import { listUpcomingCalendarItems } from "@/lib/events";
@@ -77,11 +78,27 @@ export default async function Home() {
   );
   const totalDue = due.reduce((sum, trip) => sum + trip.amountCents, 0);
 
+  /*
+    The hero is the one trip the club is collectively waiting on: the soonest
+    drop still ahead of everyone, or failing that a drop that is live right
+    now. Everything else queues in the lineup below, where the hero is not
+    repeated - a member should never wonder which of two cards for the same
+    weekend is the real one.
+  */
+  const heroTrip =
+    upcoming
+      .filter((trip) => signupState(trip).live || trip.signupOpensAt.getTime() > Date.now())
+      .sort((a, b) => a.signupOpensAt.getTime() - b.signupOpensAt.getTime())[0] ?? null;
+  const lineup = upcoming.filter((trip) => trip.id !== heroTrip?.id);
+  const heroState = heroTrip ? signupState(heroTrip) : null;
+
   return (
     <main className="mx-auto max-w-2xl px-5 py-12">
-      <header className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight">Home</h1>
-        <p className="mt-2 text-sm text-ink-muted">
+      <header className="mb-10">
+        <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
+          This season.
+        </h1>
+        <p className="mt-3 text-sm text-ink-muted">
           Trips, club events, and anything waiting on you.
         </p>
       </header>
@@ -127,18 +144,91 @@ export default async function Home() {
         </section>
       ) : null}
 
+      {heroTrip && heroState ? (
+        /*
+          The next drop, at billboard size. The countdown is the point: drops
+          are won by being there when the clock hits zero, so the clock is the
+          biggest thing on the page.
+        */
+        <section className="mb-10">
+          <Link
+            href={`/trips/${heroTrip.slug}`}
+            className="group block rounded-2xl border border-border bg-surface p-6 transition-[border-color,transform,box-shadow] duration-200 [transition-timing-function:var(--ease-soft)] hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md motion-reduce:transition-none motion-reduce:hover:translate-y-0 sm:p-8"
+          >
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              {heroState.live ? (
+                <span aria-hidden="true" className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60 motion-reduce:animate-none" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+                </span>
+              ) : null}
+              {heroState.live ? "Signups are open" : "Next drop"}
+            </div>
+
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+              {heroTrip.title}
+            </h2>
+            <p className="mt-2 text-sm text-ink-muted">
+              {formatDenver(heroTrip.departAt, {
+                hour: undefined,
+                minute: undefined,
+                timeZoneName: undefined,
+              })}
+              {heroTrip.resort ? ` · ${heroTrip.resort}` : ""} ·{" "}
+              {formatMoney(heroTrip.priceCents)} · {heroTrip.capacity} spots
+            </p>
+
+            <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
+              {heroState.live ? (
+                <p className="text-2xl font-semibold tracking-tight sm:text-3xl">
+                  Type fast. Good luck.
+                </p>
+              ) : (
+                <p className="tnum text-4xl font-semibold tracking-tight sm:text-5xl">
+                  <CountdownChip
+                    targetMs={heroTrip.signupOpensAt.getTime()}
+                    doneLabel="Open now"
+                  />
+                </p>
+              )}
+              <span className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white transition-colors group-hover:bg-accent-hover">
+                {heroState.live ? "Enter the drop" : "Get ready"}
+                <span
+                  aria-hidden="true"
+                  className="transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transition-none"
+                >
+                  &rarr;
+                </span>
+              </span>
+            </div>
+            {!heroState.live ? (
+              <p className="mt-2 text-xs text-ink-faint">
+                Opens {formatDenver(heroTrip.signupOpensAt)}
+              </p>
+            ) : null}
+          </Link>
+        </section>
+      ) : null}
+
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-faint">
-          Trips
+        <h2 className="mb-3 flex items-baseline gap-2 text-sm font-semibold uppercase tracking-wide text-ink-faint">
+          {heroTrip ? "More trips" : "Trips"}
+          {lineup.length > 0 ? <span className="tnum font-normal">{lineup.length}</span> : null}
         </h2>
 
         {upcoming.length === 0 ? (
           <Card>
             <p className="text-sm text-ink-muted">No trips posted yet.</p>
           </Card>
+        ) : lineup.length === 0 ? (
+          <Card>
+            <p className="text-sm text-ink-muted">
+              Nothing else scheduled yet. The one above is the show.
+            </p>
+          </Card>
         ) : (
           <ul className="space-y-3">
-            {upcoming.map((trip, index) => {
+            {lineup.map((trip, index) => {
               const signup = signupState(trip);
               return (
                 <li key={trip.id} className="rise" style={riseDelay(index)}>
@@ -146,6 +236,13 @@ export default async function Home() {
                     href={`/trips/${trip.slug}`}
                     className="group flex items-center gap-4 rounded-lg border border-border bg-paper p-5 transition-[border-color,transform,box-shadow] duration-200 [transition-timing-function:var(--ease-soft)] hover:-translate-y-0.5 hover:border-border-strong hover:shadow-sm motion-reduce:transition-none motion-reduce:hover:translate-y-0"
                   >
+                    {/* Lineup numerals: the season reads as a set. */}
+                    <span
+                      aria-hidden="true"
+                      className="tnum w-7 shrink-0 text-sm font-medium text-ink-faint"
+                    >
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-ink">{trip.title}</p>
                       <p className="mt-0.5 text-sm text-ink-muted">

@@ -264,6 +264,11 @@ function TripCard({
             tripTitle={trip.title}
           />
           <div className="flex flex-wrap items-center gap-2">
+            {/* Rides only matter before the bus leaves; a past trip's sheet is
+                just stale phone numbers. */}
+            {!past ? (
+              <CardAction href={`/trips/${trip.slug}/rides`}>Find a ride</CardAction>
+            ) : null}
             {/* The strip beside it already says how many there are, so this
                 stays a verb. With none yet, it says what to do about that. */}
             <CardAction href={`/trips/${trip.slug}/photos`}>

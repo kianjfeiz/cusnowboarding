@@ -572,6 +572,78 @@ export const tripPhotos = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Rides - the carpool sheet
+// ---------------------------------------------------------------------------
+
+/**
+ * A member's car, offered to the trip. The digital version of the ride
+ * spreadsheet: the club never drives anyone anywhere, it just gives people on
+ * the same trip a place to find each other.
+ *
+ * Departure and return are deliberately free text. The sheet always said
+ * things like "6am, campus lot" and "Sunday after lunch" - a timestamp picker
+ * would add friction to say less. Nothing schedules against these values.
+ */
+export const rides = pgTable(
+  "rides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    driverMemberId: uuid("driver_member_id")
+      .notNull()
+      .references(() => members.id),
+
+    /** Passenger seats on offer; the driver is not counted. */
+    seatCapacity: integer("seat_capacity").notNull(),
+    /** How riders reach the driver. Typed per ride, not read from the member row. */
+    phone: text("phone").notNull(),
+    departsNote: text("departs_note").notNull(),
+    returnsNote: text("returns_note"),
+
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at")
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [
+    // One car per driver per trip; offering again is editing, not adding.
+    uniqueIndex("rides_one_per_driver_idx").on(t.tripId, t.driverMemberId),
+    index("rides_trip_idx").on(t.tripId, t.createdAt),
+    check("rides_seats_sane", sql`${t.seatCapacity} between 1 and 8`),
+  ],
+);
+
+/**
+ * A claimed seat. `trip_id` is denormalised from the ride so the database can
+ * hold the real rule - one seat per member per TRIP, not per car - in a unique
+ * index instead of trusting application code to check every car.
+ */
+export const rideRiders = pgTable(
+  "ride_riders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    rideId: uuid("ride_id")
+      .notNull()
+      .references(() => rides.id, { onDelete: "cascade" }),
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => members.id),
+    phone: text("phone").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ride_riders_one_seat_per_trip_idx").on(t.tripId, t.memberId),
+    index("ride_riders_ride_idx").on(t.rideId, t.createdAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Forensics
 // ---------------------------------------------------------------------------
 
