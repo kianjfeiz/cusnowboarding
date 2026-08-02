@@ -46,6 +46,7 @@ export default async function EditTripPage({
           departAt: toDenverInput(trip.depart_at),
           returnAt: toDenverInput(trip.return_at),
           signupOpensAt: toDenverInput(trip.signup_opens_at),
+          signupPhrase: trip.signup_phrase,
           priceDollars: (trip.price_cents / 100).toFixed(2),
           capacity: String(trip.capacity),
           waitlistCap: trip.waitlist_cap === null ? "" : String(trip.waitlist_cap),

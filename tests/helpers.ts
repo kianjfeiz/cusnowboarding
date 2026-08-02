@@ -46,12 +46,12 @@ export async function createTestTrip(opts: TestTripOptions = {}): Promise<string
   const slug = `test-trip-${process.pid}-${++tripCounter}-${Date.now()}`;
   const { rows } = await setupPool.query<{ id: string }>(
     `insert into trips (
-       slug, title, depart_at, price_cents, capacity, waitlist_cap,
+       slug, title, depart_at, return_at, price_cents, capacity, waitlist_cap,
        signup_opens_at, payment_window_hours, requires_dues, status,
-       results_released_at
-     ) values ($1, $2, now() + interval '30 days', $3, $4, $5,
+       signup_phrase, results_released_at
+     ) values ($1, $2, now() + interval '30 days', now() + interval '31 days', $3, $4, $5,
        ${signupOpensAt}, $6, $7, $8::trip_status,
-       ${resultsReleased ? "now()" : "null"})
+       'test phrase', ${resultsReleased ? "now()" : "null"})
      returning id`,
     [slug, `Test ${slug}`, priceCents, capacity, waitlistCap, paymentWindowHours, requiresDues, status],
   );

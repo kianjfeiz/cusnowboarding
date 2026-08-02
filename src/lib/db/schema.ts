@@ -235,7 +235,12 @@ export const trips = pgTable(
     title: text("title").notNull(),
     resort: text("resort"),
     departAt: timestamptz("depart_at").notNull(),
-    returnAt: timestamptz("return_at"),
+    /**
+     * Required. Even a day trip comes back, and the return time is what the
+     * calendar and the ride sheet plan around - leaving it blank moved that
+     * question to a group chat every single time.
+     */
+    returnAt: timestamptz("return_at").notNull(),
     description: text("description"),
     priceCents: integer("price_cents").notNull(),
     capacity: integer("capacity").notNull(),
@@ -243,6 +248,19 @@ export const trips = pgTable(
     waitlistCap: integer("waitlist_cap"),
     signupOpensAt: timestamptz("signup_opens_at").notNull(),
     signupClosesAt: timestamptz("signup_closes_at"),
+
+    /**
+     * What a member types to enter this trip's drop, chosen by the board.
+     *
+     * This replaced a randomly generated five-word phrase. The purpose is
+     * unchanged - typing beats clicking, so a script gains nothing over a
+     * human - but the words are now the board's, which lets the phrase be
+     * announced at a meeting or printed on a flyer.
+     *
+     * Compared case-insensitively and with whitespace collapsed, because on
+     * drop night a stray capital or double space must not cost a spot.
+     */
+    signupPhrase: text("signup_phrase").notNull(),
     /** How long a won spot is held before the payment deadline lapses. */
     paymentWindowHours: integer("payment_window_hours").notNull().default(48),
     requiresDues: boolean("requires_dues").notNull().default(true),

@@ -52,8 +52,11 @@ export default async function NewTripPage() {
           resort: "",
           description: "",
           departAt: inputValue(depart, "06:00"),
-          returnAt: "",
+          // Same day, evening: the club runs day trips far more often than
+          // overnights, so this is the value that is usually already right.
+          returnAt: inputValue(depart, "18:00"),
           signupOpensAt: inputValue(drop, "20:00"),
+          signupPhrase: "",
           priceDollars: "85",
           capacity: "25",
           waitlistCap: "50",

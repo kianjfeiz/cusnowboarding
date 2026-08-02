@@ -1,4 +1,3 @@
-import { randomInt } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 
 /**
@@ -9,35 +8,22 @@ import { SignJWT, jwtVerify } from "jose";
  * of automating it entirely - a bot that can read the phrase is a lot more work
  * than a bot that can click.
  *
+ * The phrase is the board's own, set on the trip. It used to be five words
+ * drawn at random here; the security property never came from the randomness
+ * (the phrase is shown on screen either way) but from the token being signed
+ * and bound to one member and one trip. Letting the board choose the words
+ * means the phrase can be announced at a meeting or printed on a flyer.
+ *
  * The phrase is carried in a signed token issued when the trip page renders, so
  * at 8:00:00 the claim still verifies in process: one HMAC check, no database
  * read, no extra round trip. Nothing about this touches the claim statement.
  *
  * Honest limit: the client-side paste blocking is a speed bump, not a control.
  * Someone determined can retype anything a script feeds them. What actually
- * holds is the signed phrase (it cannot be guessed ahead of time or reused for
- * another member) plus the one-signup-per-member index.
+ * holds is the signed phrase (it cannot be reused for another member or trip)
+ * plus the one-signup-per-member index.
  */
 
-/**
- * Short, unambiguous, easy to type fast. Deliberately no homophones, no
- * doubled letters that invite typos, nothing that reads as instruction.
- */
-const WORDS = [
-  "alpine", "anchor", "aspen", "basin", "birch", "bluff", "boulder", "branch",
-  "bridge", "canyon", "carve", "cedar", "chute", "cirque", "cliff", "cobalt",
-  "copper", "cornice", "creek", "crest", "crystal", "drift", "eagle", "ember",
-  "falcon", "fern", "flint", "forest", "frost", "glacier", "granite", "gravel",
-  "harbor", "hazel", "hollow", "ivory", "juniper", "kernel", "lantern", "ledge",
-  "lichen", "lodge", "lumen", "marble", "meadow", "mesa", "moraine", "narrow",
-  "nickel", "north", "onyx", "orbit", "outpost", "pebble", "pine", "pivot",
-  "plateau", "powder", "prairie", "quartz", "quiver", "ranger", "ridge", "river",
-  "saddle", "sagebrush", "sapling", "shale", "sierra", "silver", "slate", "slope",
-  "spruce", "stone", "summit", "sunset", "talus", "timber", "trail", "tundra",
-  "valley", "vertex", "walnut", "willow", "winter", "zenith",
-];
-
-const WORD_COUNT = 5;
 const CHALLENGE_TTL = "12h";
 const AUDIENCE = "claim-challenge";
 
@@ -45,27 +31,6 @@ function secret(): Uint8Array {
   const value = process.env.MEMBER_JWT_SECRET;
   if (!value) throw new Error("MEMBER_JWT_SECRET is not set");
   return new TextEncoder().encode(value);
-}
-
-export function generatePhrase(): string {
-  /**
-   * Partial Fisher-Yates, so no word repeats. A phrase like "pebble ... pebble"
-   * is measurably slower and more error-prone to type under pressure, and on
-   * drop night a typo is a lost spot.
-   *
-   * randomInt is rejection-sampled, so the draw stays uniform - a biased phrase
-   * would be guessable, and a guessable phrase is a scriptable one.
-   */
-  const pool = [...WORDS];
-  const picked: string[] = [];
-
-  for (let i = 0; i < WORD_COUNT; i++) {
-    const index = randomInt(i, pool.length);
-    [pool[i], pool[index]] = [pool[index], pool[i]];
-    picked.push(pool[i]);
-  }
-
-  return picked.join(" ");
 }
 
 export interface Challenge {
@@ -80,7 +45,7 @@ export interface Challenge {
 export async function issueChallenge(
   tripId: string,
   memberId: string,
-  phrase: string = generatePhrase(),
+  phrase: string,
 ): Promise<Challenge> {
   const token = await new SignJWT({ p: phrase, t: tripId })
     .setProtectedHeader({ alg: "HS256" })

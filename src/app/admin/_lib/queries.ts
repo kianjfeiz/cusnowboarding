@@ -28,9 +28,11 @@ export type TripRow = {
   payment_url: string | null;
   description: string | null;
   depart_at: Date;
-  return_at: Date | null;
+  return_at: Date;
   signup_opens_at: Date;
   signup_closes_at: Date | null;
+  /** Typed by members to enter the drop; chosen by the board on the trip form. */
+  signup_phrase: string;
   claim_counter: number;
   /** Non-null once the board opens the attendee list and photo pool to members. */
   roster_finalized_at: Date | null;
@@ -70,7 +72,7 @@ const TRIP_COLUMNS = `
   t.waitlist_cap, t.price_cents, t.payment_window_hours, t.requires_dues, t.payment_url,
   t.description, t.depart_at, t.return_at, t.signup_opens_at, t.signup_closes_at,
   t.claim_counter::int as claim_counter, t.roster_finalized_at,
-  t.results_released_at, t.archived_at
+  t.results_released_at, t.archived_at, t.signup_phrase
 `;
 
 const TRIP_COUNTS = `

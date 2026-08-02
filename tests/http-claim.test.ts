@@ -1,6 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { SignJWT } from "jose";
 import { issueChallenge } from "@/lib/challenge";
+
+/** Must match the phrase `createTrip` in tests/helpers.ts stores on the trip. */
+const TEST_PHRASE = "test phrase";
 import {
   createTestTrip,
   deleteTestTrips,
@@ -81,7 +84,7 @@ describe("Test D - concurrent claims over HTTP", () => {
     // The claim now requires the drop-night typing challenge. Minting it here
     // mirrors what the page does at render time.
     const challenges = await Promise.all(
-      memberIds.map((id) => issueChallenge(tripId, id)),
+      memberIds.map((id) => issueChallenge(tripId, id, TEST_PHRASE)),
     );
 
     const { gate, release } = makeGate();
@@ -165,7 +168,7 @@ describe("Test D - concurrent claims over HTTP", () => {
 
     // Signed correctly, but for a revoked version of the member's session.
     const cookie = await mintCookie(memberId, current + 99);
-    const challenge = await issueChallenge(tripId, memberId);
+    const challenge = await issueChallenge(tripId, memberId, TEST_PHRASE);
     const response = await fetch(`${BASE_URL}/api/trips/${tripId}/claim`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
@@ -200,7 +203,7 @@ describe("Test D - concurrent claims over HTTP", () => {
     const cookie = await mintCookie(memberIds[0], tokenVersions.get(memberIds[0]) ?? 1);
 
     // Correctly signed, correctly typed - but bound to a different member.
-    const challenge = await issueChallenge(tripId, memberIds[1]);
+    const challenge = await issueChallenge(tripId, memberIds[1], TEST_PHRASE);
     const response = await fetch(`${BASE_URL}/api/trips/${tripId}/claim`, {
       method: "POST",
       headers: { cookie, "content-type": "application/json" },
@@ -216,7 +219,7 @@ describe("Test D - concurrent claims over HTTP", () => {
 
     const tripId = await createTestTrip({ capacity: 5 });
     const cookie = await mintCookie(memberIds[0], tokenVersions.get(memberIds[0]) ?? 1);
-    const challenge = await issueChallenge(tripId, memberIds[0]);
+    const challenge = await issueChallenge(tripId, memberIds[0], TEST_PHRASE);
 
     const response = await fetch(`${BASE_URL}/api/trips/${tripId}/claim`, {
       method: "POST",

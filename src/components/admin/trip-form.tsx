@@ -16,6 +16,7 @@ export interface TripFormDefaults {
   departAt: string;
   returnAt: string;
   signupOpensAt: string;
+  signupPhrase: string;
   priceDollars: string;
   capacity: string;
   waitlistCap: string;
@@ -40,12 +41,12 @@ export function TripForm({
 }) {
   const [state, formAction, pending] = useActionState<TripFormState, FormData>(action, {});
 
-  // Five fields make a trip; the rest have defaults that have been right every
-  // time. They stay one click away rather than in the way - but a trip that
+  // A handful of fields make a trip; the rest have defaults that have been right
+  // every time. They stay one click away rather than in the way - but a trip that
   // already departs from them is opened, so nobody edits a field they cannot
   // see.
   const extrasSet =
-    Boolean(defaults.resort || defaults.description || defaults.returnAt || defaults.paymentUrl) ||
+    Boolean(defaults.resort || defaults.description || defaults.paymentUrl) ||
     !defaults.requiresDues;
 
   return (
@@ -73,17 +74,30 @@ export function TripForm({
           <Field label="Departs" hint="Mountain Time.">
             <DateTimePicker name="departAt" defaultValue={defaults.departAt} required />
           </Field>
-          <Field
-            label="Signups open"
-            hint={`Mountain Time. The trip opens itself at this moment and closes ${SIGNUP_WINDOW_HOURS} hours later.`}
-          >
-            <DateTimePicker
-              name="signupOpensAt"
-              defaultValue={defaults.signupOpensAt}
-              required
-            />
+          <Field label="Returns" hint="Mountain Time. Same day for a day trip.">
+            <DateTimePicker name="returnAt" defaultValue={defaults.returnAt} required />
           </Field>
         </div>
+
+        <Field
+          label="Signups open"
+          hint={`Mountain Time. The trip opens itself at this moment and closes ${SIGNUP_WINDOW_HOURS} hours later.`}
+        >
+          <DateTimePicker name="signupOpensAt" defaultValue={defaults.signupOpensAt} required />
+        </Field>
+
+        <Field
+          label="Signup phrase"
+          hint="Members type this to enter the drop. It appears on the trip page when signups open. Capitals and extra spaces do not matter."
+        >
+          <Input
+            name="signupPhrase"
+            defaultValue={defaults.signupPhrase}
+            required
+            maxLength={80}
+            placeholder="send it breck"
+          />
+        </Field>
 
         <div className="grid gap-5 sm:grid-cols-2">
           <Field label="Price" hint="Dollars per rider.">
@@ -125,14 +139,9 @@ export function TripForm({
         </summary>
 
         <div className="space-y-5 border-t border-border px-6 py-5">
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Resort">
-              <Input name="resort" defaultValue={defaults.resort} maxLength={80} />
-            </Field>
-            <Field label="Returns" hint="Leave blank for a day trip.">
-              <DateTimePicker name="returnAt" defaultValue={defaults.returnAt} />
-            </Field>
-          </div>
+          <Field label="Resort">
+            <Input name="resort" defaultValue={defaults.resort} maxLength={80} />
+          </Field>
 
           <Field label="Description" hint="Shown on the public trip page.">
             <textarea

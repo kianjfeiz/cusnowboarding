@@ -102,6 +102,7 @@ async function main() {
       waitlistCap: 50,
       // Already open, so the public claim page is immediately exercisable.
       signupOpensAt: hoursFromNow(-1),
+      signupPhrase: "first chair fraser",
       paymentWindowHours: 48,
       requiresDues: true,
       paymentUrl: "https://club.fusionfamily.com/@/cusportclubs",
@@ -125,6 +126,7 @@ async function main() {
       waitlistCap: 50,
       // Scheduled but not yet open, for exercising the countdown.
       signupOpensAt: hoursFromNow(2),
+      signupPhrase: "send it breck",
       paymentWindowHours: 48,
       requiresDues: true,
       paymentUrl: "https://club.fusionfamily.com/@/cusportclubs",

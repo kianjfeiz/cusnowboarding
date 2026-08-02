@@ -53,12 +53,11 @@ async function createTestEvent(opts: TestEventOptions): Promise<string> {
   return rows[0].id;
 }
 
-async function moveTrip(tripId: string, departAt: string, returnAt: string | null) {
+async function moveTrip(tripId: string, departAt: string, returnAt: string) {
   await setupPool.query(
     `update trips
         set depart_at = ($2::text)::timestamp at time zone 'America/Denver',
-            return_at = case when $3::text is null then null
-                             else ($3::text)::timestamp at time zone 'America/Denver' end
+            return_at = ($3::text)::timestamp at time zone 'America/Denver'
       where id = $1`,
     [tripId, departAt, returnAt],
   );
@@ -197,11 +196,11 @@ describe("what members are allowed to see", () => {
 
   test("draft and cancelled trips are excluded too", async () => {
     const draft = await createTestTrip({ status: "draft" });
-    await moveTrip(draft, "2026-01-09 06:00:00", null);
+    await moveTrip(draft, "2026-01-09 06:00:00", "2026-01-09 20:00:00");
     const cancelled = await createTestTrip({ status: "cancelled" });
-    await moveTrip(cancelled, "2026-01-10 06:00:00", null);
+    await moveTrip(cancelled, "2026-01-10 06:00:00", "2026-01-10 20:00:00");
     const open = await createTestTrip({ status: "open" });
-    await moveTrip(open, "2026-01-11 06:00:00", null);
+    await moveTrip(open, "2026-01-11 06:00:00", "2026-01-11 20:00:00");
 
     const items = await listCalendarItems(JANUARY);
     expect(items.map((i) => i.id)).toEqual([open]);

@@ -24,12 +24,13 @@ interface TripValues {
   resort: string | null;
   description: string | null;
   departAt: Date;
-  returnAt: Date | null;
+  returnAt: Date;
   priceCents: number;
   capacity: number;
   waitlistCap: number | null;
   signupOpensAt: Date;
   signupClosesAt: Date | null;
+  signupPhrase: string;
   paymentWindowHours: number;
   requiresDues: boolean;
   paymentUrl: string | null;
@@ -60,7 +61,8 @@ function parseTripForm(formData: FormData): Parsed {
   if (!departAt) return { ok: false, error: "Departure date and time are required." };
 
   const returnAt = parseDenverInput(text(formData, "returnAt"));
-  if (returnAt && returnAt < departAt) {
+  if (!returnAt) return { ok: false, error: "Return date and time are required." };
+  if (returnAt < departAt) {
     return { ok: false, error: "The return time is before the departure time." };
   }
 
@@ -70,6 +72,21 @@ function parseTripForm(formData: FormData): Parsed {
   // Derived, not entered. The drop is decided in the first seconds, so a manual
   // close time was only ever another field to get wrong.
   const signupClosesAt = signupWindowEnd(signupOpensAt);
+
+  /*
+    Stored exactly as the board typed it, because it is shown back to members
+    on the trip page. Matching is what ignores case and spacing, not storage -
+    normalising here would quietly rewrite the board's own words.
+
+    Rejecting a blank one matters more than it looks: an empty phrase matches
+    an empty input box, so the entry form would submit itself the instant the
+    page opened.
+  */
+  const signupPhrase = text(formData, "signupPhrase");
+  if (!signupPhrase) return { ok: false, error: "A signup phrase is required." };
+  if (signupPhrase.length > 80) {
+    return { ok: false, error: "Keep the signup phrase under 80 characters." };
+  }
 
   // The board thinks in dollars; the database stores cents so that no rounding
   // ever happens on the money path.
@@ -113,6 +130,7 @@ function parseTripForm(formData: FormData): Parsed {
       waitlistCap,
       signupOpensAt,
       signupClosesAt,
+      signupPhrase,
       paymentWindowHours,
       requiresDues: formData.get("requiresDues") === "on",
       paymentUrl: text(formData, "paymentUrl") || null,
@@ -184,13 +202,13 @@ export async function createTrip(
     const rows = await execute<{ id: string }>(
       `insert into trips (
          slug, title, resort, description, depart_at, return_at, price_cents,
-         capacity, waitlist_cap, signup_opens_at, signup_closes_at,
+         capacity, waitlist_cap, signup_opens_at, signup_closes_at, signup_phrase,
          payment_window_hours, requires_dues, payment_url, status, created_by
-       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'scheduled',$15)
+       ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'scheduled',$16)
        returning id`,
       [
         v.slug, v.title, v.resort, v.description, v.departAt, v.returnAt, v.priceCents,
-        v.capacity, v.waitlistCap, v.signupOpensAt, v.signupClosesAt,
+        v.capacity, v.waitlistCap, v.signupOpensAt, v.signupClosesAt, v.signupPhrase,
         v.paymentWindowHours, v.requiresDues, v.paymentUrl, actor.boardUserId,
       ],
     );
@@ -246,14 +264,14 @@ export async function updateTrip(
       `update trips
           set slug = $2, title = $3, resort = $4, description = $5, depart_at = $6,
               return_at = $7, price_cents = $8, capacity = $9, waitlist_cap = $10,
-              signup_opens_at = $11, signup_closes_at = $12,
-              payment_window_hours = $13, requires_dues = $14, payment_url = $15,
+              signup_opens_at = $11, signup_closes_at = $12, signup_phrase = $13,
+              payment_window_hours = $14, requires_dues = $15, payment_url = $16,
               updated_at = now()
         where id = $1`,
       [
         tripId, v.slug, v.title, v.resort, v.description, v.departAt, v.returnAt,
         v.priceCents, v.capacity, v.waitlistCap, v.signupOpensAt, v.signupClosesAt,
-        v.paymentWindowHours, v.requiresDues, v.paymentUrl,
+        v.signupPhrase, v.paymentWindowHours, v.requiresDues, v.paymentUrl,
       ],
     );
   } catch (error) {

@@ -56,7 +56,7 @@ export default async function TripPage({ params }: { params: Promise<{ slug: str
       // Issued at render so that at 8:00:00 the client already holds it and
       // entering costs no extra round trip. An HMAC sign, so issuing it even
       // when an existing signup will win the render below costs nothing.
-      member ? issueChallenge(trip.id, member.id) : null,
+      member ? issueChallenge(trip.id, member.id, trip.signupPhrase) : null,
     ]);
 
   return (

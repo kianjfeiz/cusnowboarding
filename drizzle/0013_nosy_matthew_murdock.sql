@@ -1,0 +1,1 @@
+ALTER TABLE "trips" ALTER COLUMN "signup_phrase" DROP DEFAULT;
