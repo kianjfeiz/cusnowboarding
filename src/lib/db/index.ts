@@ -24,11 +24,21 @@ const poolConfig: PoolConfig = {
   connectionTimeoutMillis: 10_000,
   /**
    * A claim that cannot get the trip row lock within 4s should fail fast rather
-   * than pile up behind a drop-night queue and exhaust the pool. These are set
-   * as startup options so they cost no extra round trip; PgBouncer is
-   * configured with `IGNORE_STARTUP_PARAMETERS: options` to allow it.
+   * than pile up behind a drop-night queue and exhaust the pool.
+   *
+   * LOCAL ONLY as startup options: our PgBouncer is configured with
+   * `IGNORE_STARTUP_PARAMETERS: options`, but Neon's pooler REJECTS any
+   * connection carrying them ("unsupported startup parameter in options"),
+   * which took production down wholesale - every query, not just claims.
+   *
+   * Production gets the identical timeouts from the role instead, which
+   * survives transaction pooling because the pooler's backend sessions all
+   * belong to that role (run once per database, see docs/DEPLOY.md):
+   *
+   *   alter role neondb_owner set lock_timeout = '4s';
+   *   alter role neondb_owner set statement_timeout = '10s';
    */
-  options: "-c lock_timeout=4000 -c statement_timeout=10000",
+  ...(isLocal ? { options: "-c lock_timeout=4000 -c statement_timeout=10000" } : {}),
 };
 
 // Next.js dev server hot-reloads modules; without this every reload leaks a pool.

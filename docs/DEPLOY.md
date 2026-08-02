@@ -139,6 +139,17 @@ DIRECT_DATABASE_URL="postgresql://...neon.tech/neondb" \
   npm run board:bootstrap -- kife1762@colorado.edu "Kian Feiz"
 ```
 
+Then set the query timeouts on the role (once per database). Locally these are
+startup options on the pool, but Neon's pooler rejects startup options - it
+refuses the whole connection - so production carries them on the role instead:
+
+```sql
+alter role neondb_owner set lock_timeout = '4s';
+alter role neondb_owner set statement_timeout = '10s';
+```
+
+*(Already applied to the current production database.)*
+
 ## 12. Verify
 
 1. Open `https://cusnowboarding.com` - you should be redirected to sign-in.
