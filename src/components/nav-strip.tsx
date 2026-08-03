@@ -147,7 +147,14 @@ function NavIcon({ name }: { name: string }) {
  * Offsets are measured inside `track`, which is `w-max`, so they stay correct
  * when the strip is scrolled horizontally on a phone.
  */
-export function NavStrip({ items }: { items: NavItem[] }) {
+export function NavStrip({
+  items,
+  className = "",
+}: {
+  items: NavItem[];
+  /** Lets the surrounding header decide where the strip sits when it wraps. */
+  className?: string;
+}) {
   const pathname = usePathname() ?? "/";
   const trackRef = useRef<HTMLDivElement>(null);
   const pillRef = useRef<HTMLSpanElement>(null);
@@ -253,7 +260,9 @@ export function NavStrip({ items }: { items: NavItem[] }) {
   const radius = items.some((item) => item.icon) ? "rounded-2xl" : "rounded-full";
 
   return (
-    <nav className="-mx-1 overflow-x-auto px-1 sm:mx-0 sm:overflow-visible sm:px-0">
+    <nav
+      className={`-mx-1 overflow-x-auto px-1 sm:mx-0 sm:overflow-visible sm:px-0 ${className}`}
+    >
       {/* `w-max` so the indicator's offsets are measured against the whole strip
           and not the visible slice of a scrolled one. */}
       <div ref={trackRef} className="relative flex w-max items-center gap-1">

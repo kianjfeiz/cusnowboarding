@@ -33,7 +33,19 @@ export async function SiteHeader() {
 
   return (
     <header className="border-b border-border bg-paper">
-      <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3">
+      {/*
+        Three things that fit on one line on a laptop and cannot on a phone: the
+        wordmark is 140px, the four drawn tabs another 270, and the account
+        controls 100 more. Left to wrap on its own each took a row of its own,
+        and the header ate the top third of the screen.
+
+        So the phone gets a deliberate two-row header instead of an accidental
+        three-row one - identity and account together, the nav across the full
+        width below them, where it can also scroll. `order-last` is what moves
+        the strip under a block that follows it in the DOM, and the DOM order is
+        the one that should be read aloud: what this is, then where to go.
+      */}
+      <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3">
         {/* `-my-2 py-2` buys the wordmark a finger-sized hit area without
             adding any height to the header row. */}
         <Link href="/" className="-my-2 py-2 text-ink" aria-label="CU Snowboarding home">
@@ -41,7 +53,10 @@ export async function SiteHeader() {
         </Link>
 
         {/* Same reasoning as the board header: the strip scrolls, not the page. */}
-        <NavStrip items={navItems} />
+        <NavStrip
+          items={navItems}
+          className="order-last w-full sm:order-none sm:w-auto"
+        />
 
         <div className="ml-auto flex items-center gap-3">
           {user ? (
