@@ -7,6 +7,7 @@ import { PhotoStrip } from "@/components/photos/photo-strip";
 import { resolvePhotoViewer } from "@/app/api/photos/_viewer";
 import { getTripPhotoPreview, type TripPhotoPreview } from "@/lib/photos";
 import { listMemberTrips, type MemberTrip } from "@/lib/attendees";
+import { DrawnTitle } from "@/components/drawn-title";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "My trips - CU Snowboarding" };
@@ -65,7 +66,7 @@ export default async function MyTripsPage() {
   if (!memberId) {
     return (
       <main className="mx-auto max-w-4xl px-5 py-12">
-        <h1 className="text-2xl font-semibold tracking-tight">My trips</h1>
+        <DrawnTitle name="my-trips">My trips</DrawnTitle>
         <Card className="mt-6">
           <p className="text-sm text-ink-muted">
             Sign in to see the trips you are on, pay for a spot, and get to trip
@@ -125,7 +126,7 @@ export default async function MyTripsPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-5 py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">My trips</h1>
+      <DrawnTitle name="my-trips">My trips</DrawnTitle>
 
       {trips.length === 0 ? (
         <Card className="mt-6">

@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { MonthGrid } from "@/components/calendar/month-grid";
 import { UpcomingList } from "@/components/calendar/upcoming-list";
 import { bucketViewsByDay, toCalendarItemViews } from "@/components/calendar/view";
+import { DrawnTitle } from "@/components/drawn-title";
 import {
   currentMonth,
   denverDayKey,
@@ -54,7 +55,7 @@ export default async function CalendarPage({
     <main className="mx-auto max-w-4xl px-5 py-10">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Calendar</h1>
+          <DrawnTitle name="calendar">Calendar</DrawnTitle>
           <p className="mt-1.5 text-sm text-ink-muted">
             Club events and trips, all in Mountain Time.
           </p>

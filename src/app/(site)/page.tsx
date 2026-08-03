@@ -8,6 +8,7 @@ import { UpcomingList } from "@/components/calendar/upcoming-list";
 import { toCalendarItemViews } from "@/components/calendar/view";
 import { listUpcomingCalendarItems } from "@/lib/events";
 import { listMemberTrips, type MemberTrip } from "@/lib/attendees";
+import { DrawnTitle } from "@/components/drawn-title";
 
 export const dynamic = "force-dynamic";
 
@@ -95,7 +96,7 @@ export default async function Home() {
   return (
     <main className="mx-auto max-w-2xl px-5 py-12">
       <header className="mb-10">
-        <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">Home</h1>
+        <DrawnTitle name="home">Home</DrawnTitle>
         <p className="mt-3 text-sm text-ink-muted">
           Trips, club events, and anything waiting on you.
         </p>
