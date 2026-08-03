@@ -93,13 +93,16 @@ export default async function Home() {
   const lineup = upcoming.filter((trip) => trip.id !== heroTrip?.id);
   const heroState = heroTrip ? signupState(heroTrip) : null;
 
+  /*
+    Tighter at the top than the other pages, because the title here is a drawing
+    rather than a line of type: it already carries its own weight. The subtitle
+    that used to sit under it only described the sections below, which say what
+    they are themselves.
+  */
   return (
-    <main className="mx-auto max-w-2xl px-5 py-12">
-      <header className="mb-10">
+    <main className="mx-auto max-w-2xl px-5 pb-12 pt-6">
+      <header className="mb-6">
         <DrawnTitle name="home">Home</DrawnTitle>
-        <p className="mt-3 text-sm text-ink-muted">
-          Trips, club events, and anything waiting on you.
-        </p>
       </header>
 
       {due.length > 0 ? (
@@ -191,7 +194,7 @@ export default async function Home() {
                 </p>
               )}
               <span className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white transition-colors group-hover:bg-accent-hover">
-                {heroState.live ? "Enter the drop" : "Get ready"}
+                {heroState.live ? "Sign up" : "Get ready"}
                 <span
                   aria-hidden="true"
                   className="transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transition-none"
