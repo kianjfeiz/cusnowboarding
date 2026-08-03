@@ -55,6 +55,11 @@ export type TripSummary = TripRow & {
    * still a person who entered and still a row a delete would take with it.
    */
   signups: number;
+  /**
+   * Comped board riders. Counted apart from `paid` and never added to it: they
+   * are on the trip but they are not in the 25.
+   */
+  board_seats: number;
 };
 
 export interface Occupancy {
@@ -75,10 +80,17 @@ const TRIP_COLUMNS = `
   t.results_released_at, t.archived_at, t.signup_phrase
 `;
 
+/*
+  Board seats are excluded from every count that feeds capacity. A comped seat
+  is not one of the trip's spots - capacity 25 means 25 paying riders - so a
+  trip with six of the board on it and nineteen members sold is 19/25, not
+  25/25. They get their own count so the board can still see them.
+*/
 const TRIP_COUNTS = `
   left join lateral (
     select
-      count(*) filter (where s.status = 'paid')::int as paid,
+      count(*) filter (where s.status = 'paid' and not s.board_seat)::int as paid,
+      count(*) filter (where s.status = 'paid' and s.board_seat)::int as board_seats,
       -- The grace window must match the reaper's, or the roster advertises a
       -- free spot that promotion will refuse to fill for another ten minutes.
       count(*) filter (where s.status = 'held'
@@ -99,7 +111,7 @@ const TRIP_COUNTS = `
  */
 export async function listTrips(): Promise<TripSummary[]> {
   return execute<TripSummary>(
-    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups
+    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups, c.board_seats
        from trips t
        ${TRIP_COUNTS}
       where ${NOT_ARCHIVED}
@@ -110,7 +122,7 @@ export async function listTrips(): Promise<TripSummary[]> {
 /** Most recently filed first - the archive is read newest-first when read at all. */
 export async function listArchivedTrips(): Promise<TripSummary[]> {
   return execute<TripSummary>(
-    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups
+    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups, c.board_seats
        from trips t
        ${TRIP_COUNTS}
       where t.archived_at is not null
@@ -120,7 +132,7 @@ export async function listArchivedTrips(): Promise<TripSummary[]> {
 
 export async function getTripSummary(id: string): Promise<TripSummary | null> {
   const rows = await execute<TripSummary>(
-    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups
+    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups, c.board_seats
        from trips t
        ${TRIP_COUNTS}
       where t.id = $1`,
@@ -152,6 +164,8 @@ export type RosterRow = {
   email: string;
   phone: string | null;
   is_club_member: boolean;
+  /** Comped board rider: free, and not one of the trip's spots. */
+  board_seat: boolean;
   payment_status: string | null;
   /** How the money arrived, from the recorded payment. Null if none recorded. */
   payment_provider: string | null;
@@ -163,6 +177,7 @@ export async function getRoster(tripId: string): Promise<RosterRow[]> {
     `select s.id, s.claim_seq::int as claim_seq, s.status::text as status,
             s.spot_number, s.waitlist_position, s.claimed_at, s.payment_deadline_at,
             s.paid_at, s.amount_cents, s.paid_offline, s.offline_note, s.promoted_at,
+            s.board_seat,
             m.id as member_id, m.first_name, m.last_name, m.email::text as email,
             m.phone, m.is_club_member,
             p.status::text as payment_status, p.provider as payment_provider,

@@ -58,9 +58,19 @@ export default async function TripRosterPage({
   const roster = await getRoster(id);
   const now = Date.now();
 
+  /*
+    Comped board riders, kept apart from everything below. They are on the trip
+    but they are not in the 25 - no spot number, no money, nothing to chase - so
+    mixing them into the roster would make every count on this page disagree
+    with the capacity it is printed next to.
+  */
+  const boardSeats = roster.filter((row) => row.board_seat && row.status === "paid");
+
   // A row holding a spot, whether or not its deadline has run out: a lapsed hold
   // still physically occupies its spot_number until something releases it.
-  const onTrip = roster.filter((row) => row.status === "held" || row.status === "paid");
+  const onTrip = roster.filter(
+    (row) => !row.board_seat && (row.status === "held" || row.status === "paid"),
+  );
   const waitlist = roster
     .filter((row) => row.status === "waitlisted")
     .sort(
@@ -139,6 +149,56 @@ export default async function TripRosterPage({
       </SubmitButton>
     </form>
   ) : null;
+
+  /*
+    The board's own seats. Rendered in every stage rather than only after
+    results, because removing whoever is not actually coming is curation work -
+    the board goes on automatically when the trip is created, and this is where
+    that gets corrected. Removing one costs no member anything, which is why
+    there is no confirmation weighing a spot against it.
+  */
+  const boardSection =
+    boardSeats.length > 0 ? (
+      <Section
+        title={`Board seats (${boardSeats.length})`}
+        description="Comped, and not counted against capacity. Remove whoever is not coming."
+      >
+        <TableWrap>
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-border">
+              {boardSeats.map((row) => (
+                <tr key={row.id} className="hover:bg-surface">
+                  {/* Takes the slack so the badge and the button sit together
+                      on the right, the way every other roster row reads. */}
+                  <Td className="w-full">
+                    <div>
+                      {row.first_name} {row.last_name}
+                    </div>
+                    <div className="text-xs text-ink-muted">{row.email}</div>
+                  </Td>
+                  <Td>
+                    <Badge>Free</Badge>
+                  </Td>
+                  <Td className="text-right">
+                    {mayCurate && stage !== "cancelled" ? (
+                      <form action={cancelSignup}>
+                        <input type="hidden" name="signupId" value={row.id} />
+                        <SubmitButton
+                          variant="quiet"
+                          confirm={`Take ${row.first_name} ${row.last_name} off this trip? They are not emailed either way.`}
+                        >
+                          Remove
+                        </SubmitButton>
+                      </form>
+                    ) : null}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
+      </Section>
+    ) : null;
 
   // Post-send, the search box is the only way onto a roster for somebody who
   // did not win a spot. Read-only board members do not get it.
@@ -227,7 +287,12 @@ export default async function TripRosterPage({
           </span>
           <span className="text-ink-muted">
             {" "}
-            · {waitlist.length} waitlisted
+            {/* Named separately from the fraction beside it, because they are
+                riders but not spots: 19/25 filled with 6 board seats is a bus
+                of 25, and reading it as 25/25 would close a trip that is not
+                full. */}
+            {boardSeats.length > 0 ? `· ${boardSeats.length} board seats ` : ""}·{" "}
+            {waitlist.length} waitlisted
             {released ? (
               <>
                 {" "}
@@ -252,6 +317,7 @@ export default async function TripRosterPage({
       {curating ? (
         <div className="space-y-6">
           <CurationBoard trip={trip} roster={roster} sendAction={sendResults} />
+          {boardSection}
           {addRider ? (
             <Section
               title="Add a rider"
@@ -275,6 +341,8 @@ export default async function TripRosterPage({
               {addRider}
             </Section>
           ) : null}
+
+          {boardSection}
 
           <Section title="On the trip">
             <OnTripTable
@@ -363,7 +431,15 @@ function CurationBoard({
   roster: RosterRow[];
   sendAction: ReactNode;
 }) {
-  const active = roster.filter((row) => ["held", "paid", "waitlisted"].includes(row.status));
+  /*
+    Board seats are left off the board on purpose. They hold no spot number and
+    no waitlist position, so there is nothing to drag them between - and
+    applyRosterAssignment excludes them for the same reason, which means a card
+    rendered here could never be saved.
+  */
+  const active = roster.filter(
+    (row) => !row.board_seat && ["held", "paid", "waitlisted"].includes(row.status),
+  );
 
   const cards: RosterCardData[] = active.map((row) => ({
     id: row.id,

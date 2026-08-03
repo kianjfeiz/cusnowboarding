@@ -122,6 +122,8 @@ export interface MemberTrip {
   spotNumber: number | null;
   paymentDeadlineAt: Date | null;
   payToken: string;
+  /** Comped board rider: nothing owed on this one, ever. */
+  boardSeat: boolean;
   rosterFinalizedAt: Date | null;
   /** Members see no outcome at all until the board publishes results. */
   resultsReleased: boolean;
@@ -142,13 +144,14 @@ export async function listMemberTrips(memberId: string): Promise<MemberTrip[]> {
     spot_number: number | null;
     payment_deadline_at: Date | null;
     pay_token: string;
+    board_seat: boolean;
     roster_finalized_at: Date | null;
     results_released: boolean;
     photo_count: number;
   }>(
     `select t.id as trip_id, t.slug, t.title, t.resort, t.depart_at, t.return_at,
             t.price_cents, s.amount_cents, s.status::text as status,
-            s.spot_number, s.payment_deadline_at, s.pay_token,
+            s.spot_number, s.payment_deadline_at, s.pay_token, s.board_seat,
             t.roster_finalized_at,
             t.results_released_at is not null as results_released,
             coalesce(p.n, 0) as photo_count
@@ -178,6 +181,7 @@ export async function listMemberTrips(memberId: string): Promise<MemberTrip[]> {
     spotNumber: r.spot_number,
     paymentDeadlineAt: r.payment_deadline_at,
     payToken: r.pay_token,
+    boardSeat: r.board_seat,
     rosterFinalizedAt: r.roster_finalized_at,
     resultsReleased: r.results_released,
     photoCount: r.photo_count,

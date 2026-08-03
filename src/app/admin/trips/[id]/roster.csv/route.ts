@@ -57,6 +57,10 @@ export async function GET(
     "email",
     "phone",
     "dues_paid",
+    // The manifest is a headcount for a bus driver as much as a ledger, so a
+    // comped board rider has to be visible as a body without reading as a
+    // member who paid nothing.
+    "board_seat",
     "amount_usd",
     "paid_at",
     "payment_deadline",
@@ -78,6 +82,7 @@ export async function GET(
         row.email,
         row.phone ?? "",
         row.is_club_member ? "yes" : "no",
+        row.board_seat ? "yes" : "no",
         (row.amount_cents / 100).toFixed(2),
         at(row.paid_at),
         at(row.payment_deadline_at),

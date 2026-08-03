@@ -158,7 +158,11 @@ export async function addRiderToTrip(
   // After the commit, and never allowed to undo it: a mail provider outage
   // must not take back a spot the board has already given away.
   let notice = "";
-  if (result.resultsReleased) {
+  if (result.boardSeat) {
+    // The board is not emailed about the trips it runs, so there is nothing to
+    // report beyond what the seat is.
+    notice = "";
+  } else if (result.resultsReleased) {
     try {
       if (result.status === "held") {
         await sendEmail(
@@ -191,7 +195,11 @@ export async function addRiderToTrip(
   }
 
   const where =
-    result.status === "held" ? `spot ${result.spotNumber}` : "the end of the waitlist";
+    result.status === "board"
+      ? "the trip on a free board seat, which does not use one of the spots"
+      : result.status === "held"
+        ? `spot ${result.spotNumber}`
+        : "the end of the waitlist";
 
   return {
     ok: true,
@@ -214,11 +222,17 @@ function addFailureMessage(reason: RosterAddFailure): string {
   }
 }
 
-type SignupContext = { trip_id: string; status: string; member_id: string };
+type SignupContext = {
+  trip_id: string;
+  status: string;
+  member_id: string;
+  board_seat: boolean;
+};
 
 async function loadSignup(signupId: string): Promise<SignupContext> {
   const rows = await execute<SignupContext>(
-    `select trip_id, status::text as status, member_id from signups where id = $1`,
+    `select trip_id, status::text as status, member_id, board_seat
+       from signups where id = $1`,
     [signupId],
   );
   const row = rows[0];
@@ -288,10 +302,14 @@ export async function releaseSpot(formData: FormData): Promise<void> {
 export async function cancelSignup(formData: FormData): Promise<void> {
   const signupId = String(formData.get("signupId") ?? "");
 
-  // Read first so the capability required matches the row's actual state.
+  // Read first so the capability required matches the row's actual state. A
+  // comped board seat reads as `paid` but no money was ever involved, so taking
+  // one back is roster work, not the treasurer's - gating it on managePayments
+  // would mean the coordinator running the trip could not remove a board member
+  // who is not coming.
   const signup = await loadSignup(signupId);
   const actor = await requireCapability(
-    signup.status === "paid" ? "managePayments" : "managePromotions",
+    signup.status === "paid" && !signup.board_seat ? "managePayments" : "managePromotions",
   );
 
   if (!["held", "paid", "waitlisted"].includes(signup.status)) {

@@ -1,6 +1,8 @@
 import { pool, execute } from "@/lib/db";
+import { compBoardMembers } from "@/lib/board-seats";
 import { sendEmail } from "@/lib/email/send";
 import { gotASpotEmail, waitlistedEmail } from "@/lib/email/result-templates";
+import { renumberWaitlist } from "@/lib/promotion";
 
 /**
  * Publishing outcomes to members. The one irreversible board action of a drop.
@@ -101,6 +103,16 @@ export async function releaseResults(
       [tripId, boardUserId],
     );
 
+    /*
+      Before the deadlines are set, not after: a board member who entered the
+      drop like anybody else is comped here, and comping clears the deadline
+      this next statement would otherwise have just given them. Doing it in this
+      order also hands their spot number back to the trip before anything counts
+      what is free.
+    */
+    const comped = await compBoardMembers(client, tripId);
+    if (comped > 0) await renumberWaitlist(client, tripId);
+
     await client.query(
       `update signups
           set payment_deadline_at = now() + make_interval(hours => $2::int),
@@ -117,6 +129,11 @@ export async function releaseResults(
          join members m on m.id = s.member_id
          join trips t on t.id = s.trip_id
         where s.trip_id = $1 and s.status in ('held','paid','waitlisted')
+          -- The board is not told it is on the trips it runs. Their seat is
+          -- comped and has no deadline, so the email would carry no news and
+          -- no action - just one more message per drop for the people already
+          -- reading every other one.
+          and not s.board_seat
         order by s.claim_seq`,
       [tripId],
     );
@@ -132,7 +149,12 @@ export async function releaseResults(
         // this release is what closed and finalized the trip, so a reader of
         // the log does not go looking for the separate actions that used to
         // leave their own rows.
-        JSON.stringify({ recipients: recipients.length, closedSignups: true, finalized: true }),
+        JSON.stringify({
+          recipients: recipients.length,
+          closedSignups: true,
+          finalized: true,
+          compedBoardMembers: comped,
+        }),
       ],
     );
 

@@ -28,6 +28,25 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
     );
   }
 
+  /*
+    A board seat is `paid` for zero, so without this it would render as "the
+    treasurer recorded your payment of $0.00" - which reads like a bug to the
+    one audience that would recognise it as one. Ahead of the paid branch
+    because it is a more specific case of it.
+  */
+  if (signup.boardSeat) {
+    return (
+      <PageShell title="You are on the trip">
+        <SummaryCard signup={signup} standing="Board seat" />
+        <Notice tone="accent" title="Nothing to pay">
+          Board seats are comped, so there is no payment and no deadline on this
+          one. You are on the trip.
+        </Notice>
+        <StatusLink payToken={signup.payToken} />
+      </PageShell>
+    );
+  }
+
   if (state.kind === "paid") {
     return (
       <PageShell title="Paid">

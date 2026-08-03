@@ -3,6 +3,8 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { execute } from "@/lib/db";
+import { grantBoardSeats } from "@/lib/board-seats";
+import { withTripLock } from "@/lib/promotion";
 import type { TripStatus } from "@/lib/db/schema";
 import { requireCapability } from "../_lib/actor";
 import { recordAudit } from "../_lib/audit";
@@ -218,12 +220,37 @@ export async function createTrip(
     throw error;
   }
 
+  /*
+    The board is on its own trips by default, comped, from the moment the trip
+    exists - rather than by somebody remembering to add eight people before the
+    drop. Whoever is not actually coming is removed during curation, which costs
+    no member a spot because these seats were never part of the count.
+
+    Deliberately not inside the insert's failure path: a trip that saved but
+    whose seats did not is a trip, and the board can add themselves by hand. A
+    trip that failed to save because of a seat would be neither.
+  */
+  let boardSeats = 0;
+  try {
+    boardSeats = await withTripLock(tripId, (client) =>
+      grantBoardSeats(client, tripId, actor.boardUserId),
+    );
+  } catch (error) {
+    console.error("board seats not granted on create", tripId, error);
+  }
+
   await recordAudit({
     actorBoardUserId: actor.boardUserId,
     action: "trip.create",
     entityType: "trip",
     entityId: tripId,
-    data: { slug: v.slug, title: v.title, capacity: v.capacity, priceCents: v.priceCents },
+    data: {
+      slug: v.slug,
+      title: v.title,
+      capacity: v.capacity,
+      priceCents: v.priceCents,
+      boardSeats,
+    },
   });
 
   revalidatePath("/admin/trips");

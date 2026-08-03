@@ -26,6 +26,11 @@ export interface Occupancy {
  * The grace window is applied here too, and must match the reaper's: a hold
  * that is past its deadline but not yet reclaimable still occupies its spot,
  * so reporting it as free would advertise a seat nobody can actually be put in.
+ *
+ * Comped board seats are excluded, because they are not spots. Capacity is a
+ * count of paying riders, so a trip with six of the board on it still has all
+ * 25 to sell - counting them would tell members a trip was full when the seats
+ * they were after were all still there.
  */
 export async function getOccupancy(tripId: string, capacity: number): Promise<Occupancy> {
   const rows = await execute<{
@@ -38,7 +43,7 @@ export async function getOccupancy(tripId: string, capacity: number): Promise<Oc
        count(*) filter (where ${HOLD_OCCUPIES_SQL})::int as held,
        count(*) filter (where status = 'waitlisted')::int as waitlisted
      from signups
-     where trip_id = $1`,
+     where trip_id = $1 and not board_seat`,
     [tripId],
   );
 

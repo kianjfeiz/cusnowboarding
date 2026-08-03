@@ -24,6 +24,7 @@ const base: PaySignup = {
   amountCents: 8500,
   paidOffline: false,
   offlineNote: null,
+  boardSeat: false,
   email: "rider@colorado.edu",
   firstName: "Rider",
   tripId: "00000000-0000-0000-0000-000000000001",

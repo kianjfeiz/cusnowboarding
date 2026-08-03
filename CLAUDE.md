@@ -79,7 +79,10 @@ permuting positions in a single UPDATE collides with itself.
    strictly by server arrival order. Entrants are told only "entry received".
 2. For 15-20 minutes the board curates in the roster editor - dragging people
    in and out. This is only possible BEFORE results are released.
-3. The board sends results. ONE button, four effects: it closes signups, sets
+   The board is already on the roster - seats are granted when the trip is
+   created - so curation includes removing whoever is not coming.
+3. The board sends results. ONE button, five effects: it comps any board member
+   who entered the drop by hand, closes signups, sets
    `results_released_at`, resets every payment deadline (the window has to start
    when the member can act on it), and finalizes the roster. All in one
    transaction under the trips row lock, so the trip is never both published and
@@ -108,6 +111,40 @@ Fusion owns the money.
   webhook and no polling endpoint to add later without Fusion shipping an API.
 - Member-facing copy must say plainly that being marked paid lags actually
   paying, or members will pay and panic when the site still shows a balance.
+
+## The board rides free, and off-capacity
+
+`signups.board_seat` marks a comped board rider. Capacity is a count of PAYING
+riders: 25 means 25 members plus however many of the board are coming, so a
+board seat is not one of the spots. `src/lib/board-seats.ts` is the only place
+that writes one.
+
+The shape is what enforces it, and each part is load-bearing:
+
+- **`spot_number` is null.** Nothing that searches `generate_series(1,
+  capacity)` for a free spot can find them, and `signups_state_shape` carries a
+  clause for this case because every other live row must have a spot or a
+  waitlist position.
+- **`claim_seq` is NEGATIVE and `trips.claim_counter` is never bumped.** The
+  claim decides spot-versus-waitlist purely by arithmetic on the counter
+  (`n <= capacity`). A board seat that consumed a counter value would silently
+  cost a member their spot - eight board members would make a 25-seat trip a
+  17-seat one. This is the one that fails silently, so it has its own test.
+- **`status = 'paid'` with `amount_cents = 0`**, enforced by
+  `signups_board_seat_free`. They owe nothing, so nothing is outstanding: the
+  reaper skips them, the payments screens ignore them, and they see the
+  attendee list and photo pool like anyone else who is going. There is no
+  `payments` row behind one - no money arrived, and the column is the record.
+
+Every occupancy count filters them out (`admin/_lib/queries.ts` TRIP_COUNTS,
+`getOccupancy`, `getPaymentTotals`). The roster editor excludes them too: they
+hold no position, so there is nothing to drag.
+
+Board members are granted seats automatically when a trip is created, and
+`compBoardMembers` converts any who entered the drop by hand at release time.
+Whoever is not actually coming is removed during curation, which costs no member
+anything. **Nothing here emails the board** - they are not told about the trips
+they run.
 
 ## Two counters, different jobs
 

@@ -113,11 +113,18 @@ export async function applyRosterAssignment(
       return { ok: false, reason: "already_released" };
     }
 
+    /*
+      Comped board seats are not part of the ordering and never appear on the
+      board. They hold no spot number and no waitlist position, so there is
+      nothing about them to drag; including them here would make every save
+      fail the `missing_signup` check against a card that was never rendered.
+    */
     const { rows: current } = await client.query<CurrentRow>(
       `select s.id, s.status::text as status, m.first_name, m.last_name
          from signups s
          join members m on m.id = s.member_id
         where s.trip_id = $1 and s.status in ('held','paid','waitlisted')
+          and not s.board_seat
         order by s.claim_seq
         for update of s`,
       [tripId],
@@ -187,7 +194,8 @@ export async function applyRosterAssignment(
           set spot_number       = case when spot_number is not null then spot_number + $2 end,
               waitlist_position = case when waitlist_position is not null
                                        then waitlist_position + $2 end
-        where trip_id = $1 and status in ('held','paid','waitlisted')`,
+        where trip_id = $1 and status in ('held','paid','waitlisted')
+          and not board_seat`,
       [tripId, OFFSET],
     );
 

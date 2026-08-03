@@ -395,6 +395,36 @@ export const signups = pgTable(
     paidOffline: boolean("paid_offline").notNull().default(false),
     offlineNote: text("offline_note"),
 
+    /**
+     * A comped seat for a board member. The board rides free, and a board seat
+     * is NOT one of the trip's spots - capacity 25 means 25 paying riders plus
+     * however many of the board are coming.
+     *
+     * Which is why these rows look the way they do:
+     *
+     *   - `spot_number` is NULL. They do not occupy a numbered seat, so nothing
+     *     that searches `generate_series(1, capacity)` for a free spot can find
+     *     them and nothing that counts occupancy should include them. That is
+     *     also why `signups_state_shape` carries a clause for them: every other
+     *     live row must have a spot number or a waitlist position.
+     *   - `claim_seq` is NEGATIVE, and `trips.claim_counter` is never bumped
+     *     for one. The claim statement decides spot-versus-waitlist purely by
+     *     arithmetic on the counter (`n <= capacity`), so a board seat that
+     *     consumed a counter value would silently cost a member their spot -
+     *     eight board members would turn a 25-seat trip into a 17-seat one.
+     *     Negative values sort before every real entrant, which is honest: the
+     *     board was on the list before the drop opened.
+     *   - `status` is 'paid' with `amount_cents` 0. They owe nothing, so
+     *     nothing about them is outstanding: the reaper skips them, the
+     *     payments screens ignore them, and they can see the attendee list and
+     *     photo pool like anyone else who is actually going.
+     *
+     * There is no `payments` row behind one. Every other paid signup has one
+     * because a human decided money arrived; here nothing arrived, and this
+     * column is the record of why.
+     */
+    boardSeat: boolean("board_seat").notNull().default(false),
+
     createdByBoardUserId: uuid("created_by_board_user_id").references(() => boardUsers.id),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at")
@@ -438,6 +468,9 @@ export const signups = pgTable(
         (${t.status} in ('held','paid')
            and ${t.spotNumber} is not null
            and ${t.waitlistPosition} is null)
+        or (${t.status} = 'paid' and ${t.boardSeat}
+           and ${t.spotNumber} is null
+           and ${t.waitlistPosition} is null)
         or (${t.status} = 'waitlisted'
            and ${t.spotNumber} is null
            and ${t.waitlistPosition} is not null)
@@ -445,6 +478,12 @@ export const signups = pgTable(
            and ${t.spotNumber} is null)
       `,
     ),
+    /**
+     * The board rides free, made a fact of the database rather than a promise
+     * of the code that writes these rows. A comped seat carrying a balance is
+     * a rider who gets chased for money they were told they did not owe.
+     */
+    check("signups_board_seat_free", sql`not ${t.boardSeat} or ${t.amountCents} = 0`),
     check(
       "signups_held_has_deadline",
       sql`${t.status} <> 'held' or ${t.paymentDeadlineAt} is not null`,

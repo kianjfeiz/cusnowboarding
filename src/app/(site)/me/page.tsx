@@ -208,7 +208,12 @@ function TripCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {!trip.resultsReleased ? (
+          {trip.boardSeat ? (
+            // Ahead of the pre-release badge: a board member did not enter the
+            // drop, they were put on the trip when it was created, so "Entry
+            // received" would be telling them about something they never did.
+            <Badge emphasis="strong">Board seat</Badge>
+          ) : !trip.resultsReleased ? (
             // Same badge whatever the outcome, until the board publishes.
             <Badge emphasis="muted">Entry received</Badge>
           ) : trip.status === "paid" ? (

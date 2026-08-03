@@ -26,6 +26,8 @@ export interface PaySignup {
   amountCents: number;
   paidOffline: boolean;
   offlineNote: string | null;
+  /** Comped board rider: nothing owed, and not one of the trip's spots. */
+  boardSeat: boolean;
   email: string;
   firstName: string;
   tripId: string;
@@ -68,6 +70,7 @@ interface PayRow {
   amount_cents: number;
   paid_offline: boolean;
   offline_note: string | null;
+  board_seat: boolean;
   email: string;
   first_name: string;
   trip_id: string;
@@ -84,7 +87,7 @@ interface PayRow {
 const PAY_SQL = `
 select s.id, s.pay_token, s.status::text as status, s.spot_number,
        s.payment_deadline_at, s.paid_at, s.amount_cents, s.paid_offline,
-       s.offline_note, s.trip_id, s.member_id,
+       s.offline_note, s.board_seat, s.trip_id, s.member_id,
        m.email::text as email, m.first_name,
        t.title as trip_title, t.slug as trip_slug, t.resort, t.depart_at,
        t.return_at, t.payment_url,
@@ -106,6 +109,7 @@ function toSignup(row: PayRow): PaySignup {
     paidAt: row.paid_at,
     amountCents: row.amount_cents,
     paidOffline: row.paid_offline,
+    boardSeat: row.board_seat,
     offlineNote: row.offline_note,
     email: row.email,
     firstName: row.first_name,

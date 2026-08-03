@@ -293,7 +293,11 @@ export async function getPaymentTotals(): Promise<PaymentTotals> {
      from signups s
      join trips t on t.id = s.trip_id
      where t.status in ${LIVE_TRIP_STATUSES}
-       and t.archived_at is null`,
+       and t.archived_at is null
+       -- A comped board seat is worth nothing to every sum here, but it would
+       -- add one to paid_count - reporting riders the treasurer collected from
+       -- when nobody collected anything.
+       and not s.board_seat`,
   );
 
   return (

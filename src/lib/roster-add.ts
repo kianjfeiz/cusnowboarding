@@ -1,4 +1,5 @@
 import { pool } from "@/lib/db";
+import { isBoardMember, NEXT_BOARD_SEQ } from "@/lib/board-seats";
 import { generatePayToken } from "@/lib/claims/claim";
 import { releaseLapsedHolds } from "@/lib/promotion";
 
@@ -48,7 +49,14 @@ export type RosterAddResult =
       signupId: string;
       /** True when an existing released or cancelled row came back. */
       revived: boolean;
-      status: "held" | "waitlisted";
+      status: "held" | "waitlisted" | "board";
+      /**
+       * True when the member is on the board, so they were comped rather than
+       * given one of the trip's spots - whatever the caller asked for. The
+       * caller uses this to decide not to email: the board is not told it is
+       * on the trips it runs.
+       */
+      boardSeat: boolean;
       spotNumber: number | null;
       waitlistPosition: number | null;
       paymentDeadlineAt: Date | null;
@@ -130,13 +138,20 @@ export async function addMemberToTrip(
     }
     const member = memberRows[0];
 
+    /*
+      The board rides free and off-capacity, so which list the caller asked for
+      does not apply to them: there is no spot to take and no waitlist to wait
+      on. Checked before any allocation, because a board seat needs none of it.
+    */
+    const board = await isBoardMember(client, memberId);
+
     /**
      * A lapsed hold still physically occupies its spot_number until something
      * releases it. Without this the board would be told the trip is full while
      * the roster above the search box reports a free spot - the same reason
      * promotion and reinstate both do it first.
      */
-    if (to === "trip") await releaseLapsedHolds(client, tripId);
+    if (to === "trip" && !board) await releaseLapsedHolds(client, tripId);
 
     // `signups_one_active_per_member` would reject the write anyway. Catching
     // it here turns a raw 23505 into something the board can read.
@@ -154,7 +169,10 @@ export async function addMemberToTrip(
     let spot: number | null = null;
     let position: number | null = null;
 
-    if (to === "trip") {
+    if (board) {
+      // Nothing to allocate. Both stay null, which is the shape schema.ts
+      // describes: a comped seat occupies neither a spot nor a queue position.
+    } else if (to === "trip") {
       // Lowest unoccupied spot number, so the roster stays dense. Never a
       // count(*) against capacity - that reads a snapshot and oversells.
       const { rows: freeRows } = await client.query<{ spot: number }>(
@@ -200,7 +218,28 @@ export async function addMemberToTrip(
     const revived = deadRows.length > 0;
     let written: WrittenRow;
 
-    if (revived) {
+    if (revived && board) {
+      /*
+        A board member who was on this trip and came off it. The row goes back
+        as a comped seat rather than to whatever it was before - if they paid
+        for it last time, the money is a refund conversation for the treasurer
+        and not something to quietly zero out here, which is why only released
+        and cancelled rows are revivable at all.
+      */
+      const { rows } = await client.query<WrittenRow>(
+        `update signups
+            set status = 'paid', board_seat = true, amount_cents = 0,
+                spot_number = null, waitlist_position = null,
+                payment_deadline_at = null, paid_at = now(),
+                released_at = null, release_reason = null,
+                created_by_board_user_id = $3::uuid, updated_at = now()
+          where id = $1 and trip_id = $2
+          returning id, spot_number, waitlist_position, payment_deadline_at,
+                    amount_cents, pay_token`,
+        [deadRows[0].id, tripId, boardUserId],
+      );
+      written = rows[0];
+    } else if (revived) {
       /**
        * `released_at` and `release_reason` are cleared because the row is live
        * again and those two columns are what every reader uses to tell a live
@@ -224,6 +263,26 @@ export async function addMemberToTrip(
           returning id, spot_number, waitlist_position, payment_deadline_at,
                     amount_cents, pay_token`,
         [deadRows[0].id, tripId, spot, position, trip.payment_window_hours, boardUserId],
+      );
+      written = rows[0];
+    } else if (board) {
+      /*
+        A negative claim_seq, and the counter is left alone. Bumping it for a
+        comped seat would make the claim statement hand out one fewer spot than
+        the trip has - see the board_seat column comment in schema.ts.
+      */
+      const { rows } = await client.query<WrittenRow>(
+        `insert into signups (
+           trip_id, member_id, claim_seq, status, spot_number, waitlist_position,
+           claimed_at, payment_deadline_at, paid_at, amount_cents, pay_token,
+           board_seat, created_by_board_user_id
+         ) values (
+           $1, $2, ${NEXT_BOARD_SEQ}, 'paid', null, null,
+           now(), null, now(), 0, $3, true, $4::uuid
+         )
+         returning id, spot_number, waitlist_position, payment_deadline_at,
+                   amount_cents, pay_token`,
+        [tripId, memberId, generatePayToken(), boardUserId],
       );
       written = rows[0];
     } else {
@@ -281,6 +340,7 @@ export async function addMemberToTrip(
           memberId,
           to,
           revived,
+          boardSeat: board,
           spotNumber: written.spot_number,
           waitlistPosition: written.waitlist_position,
         }),
@@ -293,7 +353,8 @@ export async function addMemberToTrip(
       ok: true,
       signupId: written.id,
       revived,
-      status: written.spot_number !== null ? "held" : "waitlisted",
+      boardSeat: board,
+      status: board ? "board" : written.spot_number !== null ? "held" : "waitlisted",
       spotNumber: written.spot_number,
       waitlistPosition: written.waitlist_position,
       paymentDeadlineAt: written.payment_deadline_at,
