@@ -4,56 +4,29 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { execute } from "@/lib/db";
 import { promoteFromWaitlist, renumberWaitlist, withTripLock } from "@/lib/promotion";
 import { releaseResults } from "@/lib/results";
+import {
+  addMemberToTrip,
+  type RosterAddDestination,
+  type RosterAddFailure,
+} from "@/lib/roster-add";
 import { applyRosterAssignment, type RosterEditRefusal } from "@/lib/roster-edit";
 import { sendEmail } from "@/lib/email/send";
+import { gotASpotEmail, waitlistedEmail } from "@/lib/email/result-templates";
 import { promotedEmail } from "@/lib/email/templates";
 import type { RosterSaveResult } from "@/components/admin/roster-board";
 import { requireCapability } from "../../_lib/actor";
 import { recordAudit } from "../../_lib/audit";
-
-/**
- * Declares the roster settled.
- *
- * This is what opens the attendee list and the photo pool to members. It is a
- * deliberate human action rather than something derived from the trip date:
- * until the board says so, holds are still lapsing and the waitlist is still
- * moving, and publishing a list that keeps changing would both confuse people
- * and quietly reveal who is about to lose their spot for non-payment.
- *
- * Reversible - unfinalizing hides the list again if the board moves too early.
- */
-export async function setRosterFinalized(formData: FormData): Promise<void> {
-  const actor = await requireCapability("managePromotions");
-
-  const tripId = String(formData.get("tripId") ?? "");
-  const finalized = String(formData.get("finalized") ?? "") === "true";
-
-  await execute(
-    `update trips
-        set roster_finalized_at = case when $2::boolean then now() else null end,
-            roster_finalized_by = case when $2::boolean then $3::uuid else null end,
-            updated_at = now()
-      where id = $1`,
-    [tripId, finalized, actor.boardUserId],
-  );
-
-  await recordAudit({
-    actorBoardUserId: actor.boardUserId,
-    action: finalized ? "trip.roster_finalized" : "trip.roster_unfinalized",
-    entityType: "trip",
-    entityId: tripId,
-  });
-
-  refreshTrip(tripId);
-}
+import { searchAddableMembers, type AddableMember } from "../../_lib/queries";
 
 /**
  * Publishes outcomes to everyone who entered.
  *
  * The board takes fifteen or twenty minutes after a drop to curate the waitlist
  * before anyone is told anything, so this is a deliberate button rather than
- * something the drop does on its own. It also restarts every payment deadline -
- * see releaseResults for why that is not optional.
+ * something the drop does on its own. It is also the ONLY button: it closes
+ * signups, publishes outcomes, restarts every payment deadline and finalizes
+ * the roster. See releaseResults for why each of those belongs to this moment
+ * rather than to a separate press the board has to remember.
  */
 export async function releaseTripResults(formData: FormData): Promise<void> {
   const actor = await requireCapability("managePromotions");
@@ -136,6 +109,108 @@ function refusalMessage(
       return "That trip no longer exists.";
     default:
       return "The roster could not be saved.";
+  }
+}
+
+/**
+ * Typeahead behind the "Add a rider" box.
+ *
+ * A read, but still capability-gated: the whole member directory is not
+ * something an unauthenticated caller gets to page through one query string at
+ * a time.
+ */
+export async function searchMembersToAdd(
+  tripId: string,
+  query: string,
+): Promise<AddableMember[]> {
+  await requireCapability("managePromotions");
+  return searchAddableMembers(tripId, String(query ?? ""));
+}
+
+/**
+ * Puts a member on the trip or the waitlist by hand.
+ *
+ * Whether this notifies is decided by the trip, not by the board: before
+ * results are out nobody has been told anything and a silent add matches every
+ * other pre-release move, while afterwards the person is holding a spot with a
+ * payment clock running against it. Sending that email is the difference
+ * between adding someone and stranding them.
+ */
+export async function addRiderToTrip(
+  tripId: string,
+  memberId: string,
+  to: RosterAddDestination,
+): Promise<RosterSaveResult> {
+  const actor = await requireCapability("managePromotions");
+
+  if (to !== "trip" && to !== "waitlist") {
+    return { ok: false, message: "That is not a list on this trip." };
+  }
+
+  const result = await addMemberToTrip(tripId, memberId, actor.boardUserId, to);
+
+  if (!result.ok) {
+    return { ok: false, message: addFailureMessage(result.reason) };
+  }
+
+  refreshTrip(tripId);
+
+  // After the commit, and never allowed to undo it: a mail provider outage
+  // must not take back a spot the board has already given away.
+  let notice = "";
+  if (result.resultsReleased) {
+    try {
+      if (result.status === "held") {
+        await sendEmail(
+          gotASpotEmail({
+            to: result.memberEmail,
+            firstName: result.memberFirstName,
+            tripTitle: result.tripTitle,
+            spotNumber: result.spotNumber ?? 0,
+            amountCents: result.amountCents,
+            deadline: result.paymentDeadlineAt ?? new Date(),
+            payToken: result.payToken,
+          }),
+        );
+      } else {
+        await sendEmail(
+          waitlistedEmail({
+            to: result.memberEmail,
+            firstName: result.memberFirstName,
+            tripTitle: result.tripTitle,
+          }),
+        );
+      }
+      notice = " They have been emailed.";
+    } catch (error) {
+      console.error("board add notice failed", result.signupId, error);
+      notice = " The email failed to send - tell them yourself.";
+    }
+  } else {
+    notice = " Nobody has been told anything yet.";
+  }
+
+  const where =
+    result.status === "held" ? `spot ${result.spotNumber}` : "the end of the waitlist";
+
+  return {
+    ok: true,
+    message: `${result.memberName} added to ${where}.${notice}`,
+  };
+}
+
+function addFailureMessage(reason: RosterAddFailure): string {
+  switch (reason) {
+    case "already_active":
+      return "They are already on this trip or its waitlist.";
+    case "no_free_spot":
+      return "Every spot is taken. Release someone first, or add them to the waitlist.";
+    case "member_blocked":
+      return "That member is blocked.";
+    case "member_missing":
+      return "That member no longer exists.";
+    case "trip_missing":
+      return "That trip no longer exists.";
   }
 }
 

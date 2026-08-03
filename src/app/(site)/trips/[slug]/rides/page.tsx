@@ -81,9 +81,9 @@ export default async function TripRidesPage({
       </header>
 
       {!entitled || !member ? (
-        <Notice title="The ride sheet opens once the roster is final">
+        <Notice title="The ride sheet opens once you are paid up">
           {member
-            ? "Rides are organised between the people who are on this trip. If you are on it, this opens as soon as the board finalizes the roster."
+            ? "Rides are organised between the people who are on this trip, so this opens once results are out and your payment is recorded. Being marked paid lags actually paying by a day or two."
             : "Sign in with the address you used to sign up, and make sure you are on this trip."}
         </Notice>
       ) : (

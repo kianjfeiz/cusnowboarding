@@ -3,20 +3,35 @@ import { sendEmail } from "@/lib/email/send";
 import { gotASpotEmail, waitlistedEmail } from "@/lib/email/result-templates";
 
 /**
- * Publishing outcomes to members.
+ * Publishing outcomes to members. The one irreversible board action of a drop.
  *
  * The drop decides the initial allocation; the board then spends fifteen or
  * twenty minutes curating the waitlist before anyone is told anything. Until
  * release, every entrant sees the same neutral "entry received".
  *
- * Releasing does three things, and the second is the one that is easy to miss:
+ * Releasing does five things, and the third is the one that is easy to miss:
  *
- *   1. Marks the trip released, which is what unlocks the member views.
- *   2. RESETS the payment deadline on every held signup to now + the trip's
+ *   1. CLOSES SIGNUPS. Publishing a roster while the drop is still accepting
+ *      entries would hand a spot to someone after the results went out, with
+ *      no email and no place in the list everyone was just shown. There was a
+ *      separate "Close signups" button for this; leaving the two apart meant
+ *      the safe order was something the board had to remember at 8:20pm.
+ *   2. Marks the trip released, which is what unlocks the member views.
+ *   3. RESETS the payment deadline on every held signup to now + the trip's
  *      payment window. The clock has to start when the member can actually act.
  *      Left alone, a board releasing an hour late would be running down a
  *      deadline against people who had not yet been told they had a spot.
- *   3. Emails everyone their outcome.
+ *   4. FINALIZES THE ROSTER, which opens the attendee list, the ride sheet and
+ *      the photo pool. This used to be a second button pressed days later, to
+ *      avoid publishing a list that was still churning. It does not need to be:
+ *      every one of those views lists `status = 'paid'` only and is readable
+ *      only by someone who is themselves paid, so at release the list is empty
+ *      and fills as the money lands. Nobody unpaid is named, which was the
+ *      whole reason for the delay.
+ *   5. Emails everyone their outcome.
+ *
+ * All four writes are one transaction under the trips row lock, so there is no
+ * window where the trip is released but still claimable.
  */
 
 export interface ReleaseResult {
@@ -71,7 +86,17 @@ export async function releaseResults(
 
     await client.query(
       `update trips
-          set results_released_at = now(), results_released_by = $2, updated_at = now()
+          set results_released_at = now(),
+              results_released_by = $2,
+              roster_finalized_at = now(),
+              roster_finalized_by = $2,
+              -- The claim statement only accepts 'scheduled' and 'open', so
+              -- this is what actually stops entries. A trip already cancelled
+              -- or closed early keeps the status it has - this must only ever
+              -- close signups, never reopen them.
+              status = case when status in ('draft','scheduled','open')
+                            then 'closed'::trip_status else status end,
+              updated_at = now()
         where id = $1`,
       [tripId, boardUserId],
     );
@@ -100,7 +125,15 @@ export async function releaseResults(
     await client.query(
       `insert into audit_events (actor_board_user_id, action, entity_type, entity_id, data)
        values ($1, 'trip.results_released', 'trip', $2, $3::jsonb)`,
-      [boardUserId, tripId, JSON.stringify({ recipients: recipients.length })],
+      [
+        boardUserId,
+        tripId,
+        // One event, because it was one decision. The two flags record that
+        // this release is what closed and finalized the trip, so a reader of
+        // the log does not go looking for the separate actions that used to
+        // leave their own rows.
+        JSON.stringify({ recipients: recipients.length, closedSignups: true, finalized: true }),
+      ],
     );
 
     await client.query("commit");

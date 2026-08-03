@@ -27,12 +27,16 @@ function rowAction(
   if (phase === "draft") {
     return { target: "scheduled", label: transitionLabel("draft", "scheduled") };
   }
+  // Closing early is still worth a button: the board sometimes wants entries to
+  // stop before it is ready to publish anything. Sending results closes signups
+  // on its own, so this is a shortcut rather than a step.
   if (phase === "live") {
     return { target: "closed", label: transitionLabel(trip.status, "closed") };
   }
   // Reopening only does something while the window is still running - the claim
   // statement checks signup_closes_at too, so after that it would be a button
-  // that changes a word and nothing else.
+  // that changes a word and nothing else. A released trip is never in this
+  // phase, which is what keeps entries off a roster everybody has been shown.
   if (phase === "closed") {
     const closes = trip.signup_closes_at ? new Date(trip.signup_closes_at).getTime() : null;
     if (closes === null || closes > now) {
@@ -136,11 +140,19 @@ export default async function TripsPage() {
                       </Td>
 
                       <Td className="whitespace-nowrap">
+                        {/* "Roster final" used to live on the second line, back
+                            when it was a separate press. Sending results does
+                            it, so the interesting number after release is how
+                            much money is still out. */}
                         {trip.results_released_at ? (
                           <>
                             <span className="text-ink">Sent</span>
                             <span className="mt-0.5 block text-xs text-ink-faint">
-                              {trip.roster_finalized_at ? "Roster final" : "Roster not final"}
+                              {unsettled > 0
+                                ? `${unsettled} unpaid`
+                                : trip.paid > 0
+                                  ? "All paid"
+                                  : "Nobody paid yet"}
                             </span>
                           </>
                         ) : (

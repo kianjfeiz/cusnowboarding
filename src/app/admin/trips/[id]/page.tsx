@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { Badge, Button, Notice, formatDenver, formatMoney } from "@/components/ui";
 import { EmptyRow, PageHeader, Section, TableWrap, Td, Th } from "@/components/admin/shell";
+import { RosterAdd } from "@/components/admin/roster-add";
 import { RosterBoard, type RosterCardData } from "@/components/admin/roster-board";
 import { SubmitButton } from "@/components/admin/submit-button";
 import { can } from "@/lib/authz";
@@ -17,12 +18,13 @@ import {
   type RosterRow,
 } from "../../_lib/queries";
 import {
+  addRiderToTrip,
   cancelSignup,
   promoteSignup,
   releaseSpot,
   releaseTripResults,
   saveRosterOrder,
-  setRosterFinalized,
+  searchMembersToAdd,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -33,10 +35,15 @@ export const dynamic = "force-dynamic";
  * Which stage the trip is in decides what this page is: before results are sent
  * the job is curating, so the page IS the editor; afterwards the list is public
  * and every change has to be an announced one, so it becomes a table with
- * release, cancel and promote on it. Those two things are never both true, which
- * is why they are never both on screen.
+ * release, cancel, promote and the search box on it. Those two things are never
+ * both true, which is why they are never both on screen.
+ *
+ * There is exactly one stage boundary the board crosses by hand - "Send
+ * results". Closing signups, publishing outcomes and finalizing the roster were
+ * three buttons that had to be pressed in the right order; they are one now, so
+ * `sent` is the only stage after `curate`.
  */
-type Stage = "before" | "drop" | "curate" | "collect" | "final" | "cancelled";
+type Stage = "before" | "drop" | "curate" | "sent" | "cancelled";
 
 export default async function TripRosterPage({
   params,
@@ -76,15 +83,13 @@ export default async function TripRosterPage({
   const stage: Stage =
     trip.status === "cancelled"
       ? "cancelled"
-      : trip.roster_finalized_at
-        ? "final"
-        : released
-          ? "collect"
-          : now < opensAt.getTime()
-            ? "before"
-            : now < closesAt.getTime()
-              ? "drop"
-              : "curate";
+      : released
+        ? "sent"
+        : now < opensAt.getTime()
+          ? "before"
+          : now < closesAt.getTime()
+            ? "drop"
+            : "curate";
 
   // The list is only editable in place while nobody has been told anything. A
   // cancelled trip is history, not work in progress.
@@ -113,33 +118,38 @@ export default async function TripRosterPage({
       (row.status === "expired" || row.status === "cancelled"),
   );
 
+  /*
+    The one irreversible press on this page, so the confirmation spells out all
+    of it rather than only the part the button is named after. A board member
+    who reads "Send results" and expects signups to keep running is exactly who
+    this sentence is for.
+  */
   const sendResults = mayCurate ? (
     <form action={releaseTripResults}>
       <input type="hidden" name="tripId" value={trip.id} />
       <SubmitButton
         variant="primary"
-        confirm={`Send results to everyone who entered? ${onTrip.length} will be told they are on the trip and ${waitlist.length} will be told they are waitlisted. This cannot be undone.`}
+        confirm={
+          `Send results to everyone who entered? ${onTrip.length} will be told they are on the trip and ` +
+          `${waitlist.length} will be told they are waitlisted. This also closes signups and opens the ` +
+          `attendee list and photos to whoever pays. This cannot be undone.`
+        }
       >
         Send results
       </SubmitButton>
     </form>
   ) : null;
 
-  const finalizeToggle = mayCurate ? (
-    <form action={setRosterFinalized}>
-      <input type="hidden" name="tripId" value={trip.id} />
-      <input type="hidden" name="finalized" value={trip.roster_finalized_at ? "false" : "true"} />
-      <SubmitButton
-        variant={trip.roster_finalized_at ? "quiet" : "primary"}
-        confirm={
-          trip.roster_finalized_at
-            ? "Unfinalize this roster? Riders will lose access to the attendee list and photos."
-            : `Finalize with ${unpaidHolds} unpaid hold${unpaidHolds === 1 ? "" : "s"} outstanding?`
-        }
-      >
-        {trip.roster_finalized_at ? "Unfinalize" : "Finalize roster"}
-      </SubmitButton>
-    </form>
+  // Post-send, the search box is the only way onto a roster for somebody who
+  // did not win a spot. Read-only board members do not get it.
+  const addRider = mayCurate ? (
+    <RosterAdd
+      tripId={trip.id}
+      freeSpots={free}
+      notifies={released}
+      search={searchMembersToAdd}
+      add={addRiderToTrip}
+    />
   ) : null;
 
   const stages: Record<Stage, { title: string; detail: ReactNode; action: ReactNode }> = {
@@ -154,7 +164,7 @@ export default async function TripRosterPage({
       title: "Signups are open",
       detail: `Spots are going out strictly by arrival order, and entrants have been told only that their entry was received. Entries can still arrive until ${formatDenver(
         closesAt,
-      )}. Move people between the lists below, then send results.`,
+      )}. Move people between the lists below, then send results - which closes signups too, so there is no need to close them first.`,
       action: null,
     },
     curate: {
@@ -162,29 +172,21 @@ export default async function TripRosterPage({
       detail: null,
       action: null,
     },
-    collect: {
+    sent: {
       title: "Results sent - collecting payment",
       detail: (
         <>
-          Sent {trip.results_released_at ? formatDenver(trip.results_released_at) : ""}. The
-          list is public now, so anything that moves a spot notifies the person.
+          Sent {trip.results_released_at ? formatDenver(trip.results_released_at) : ""}.
+          Signups are closed and the roster is final, so riders who pay can see who else is
+          going and share photos. Anything that moves a spot from here notifies the person.
           {lapsed > 0
             ? ` ${lapsed} hold${lapsed === 1 ? " has" : "s have"} lapsed - release ${
                 lapsed === 1 ? "it" : "them"
               } to free the spot, then promote someone from the waitlist.`
-            : ""}{" "}
-          Finalize once the holds have settled: that opens the attendee list and the photo
-          pool to everyone who paid.
+            : ""}
         </>
       ),
-      action: finalizeToggle,
-    },
-    final: {
-      title: "Roster is final",
-      detail: `Finalized ${
-        trip.roster_finalized_at ? formatDenver(trip.roster_finalized_at) : ""
-      }. Riders can see who is on the trip and share photos.`,
-      action: finalizeToggle,
+      action: null,
     },
     cancelled: {
       title: "Trip cancelled",
@@ -248,9 +250,32 @@ export default async function TripRosterPage({
       ) : null}
 
       {curating ? (
-        <CurationBoard trip={trip} roster={roster} sendAction={sendResults} />
+        <div className="space-y-6">
+          <CurationBoard trip={trip} roster={roster} sendAction={sendResults} />
+          {addRider ? (
+            <Section
+              title="Add a rider"
+              description="Somebody who did not enter the drop. They land on the board above."
+            >
+              {addRider}
+            </Section>
+          ) : null}
+        </div>
       ) : (
         <div className="space-y-6">
+          {/* Above the roster rather than below it: after results are out this
+              is the board's most-used control on the page - people drop, other
+              people take their place - and a thirty-row table should not be
+              scrolled past to reach it. */}
+          {addRider && stage !== "cancelled" ? (
+            <Section
+              title="Add a rider"
+              description="Anyone in the club, whether or not they entered the drop."
+            >
+              {addRider}
+            </Section>
+          ) : null}
+
           <Section title="On the trip">
             <OnTripTable
               rows={onTrip}
@@ -351,6 +376,14 @@ function CurationBoard({
 
   return (
     <RosterBoard
+      /*
+        Remount whenever the set of people changes. The board holds its baseline
+        in client state, so a rider added through the search box below would
+        otherwise leave it editing a list it cannot save - applyRosterAssignment
+        refuses an ordering that omits an active signup, and the board member
+        would only find out when Save failed.
+      */
+      key={active.map((row) => row.id).join(",")}
       tripId={trip.id}
       capacity={trip.capacity}
       cards={cards}
@@ -512,24 +545,38 @@ function WaitlistTable({
                 <Td className="tnum text-right text-ink-faint">
                   <span title="Arrival order on drop night">#{row.claim_seq}</span>
                 </Td>
-                <Td className="text-right">
+                <Td className="text-right whitespace-nowrap">
                   {mayCurate ? (
-                    <form action={promoteSignup}>
-                      <input type="hidden" name="signupId" value={row.id} />
-                      {/*
-                        Disabled is a courtesy only. promoteFromWaitlist takes
-                        the trip row lock and re-checks that a spot is genuinely
-                        free, so two coordinators clicking at once cannot both
-                        be handed the same seat.
-                      */}
-                      <SubmitButton
-                        disabled={free === 0}
-                        title={free === 0 ? "No spot is free" : undefined}
-                        confirm={`Give ${row.first_name} ${row.last_name} a spot? They are emailed straight away with a payment deadline.`}
-                      >
-                        Promote
-                      </SubmitButton>
-                    </form>
+                    <div className="flex items-center justify-end gap-2">
+                      <form action={promoteSignup}>
+                        <input type="hidden" name="signupId" value={row.id} />
+                        {/*
+                          Disabled is a courtesy only. promoteFromWaitlist takes
+                          the trip row lock and re-checks that a spot is genuinely
+                          free, so two coordinators clicking at once cannot both
+                          be handed the same seat.
+                        */}
+                        <SubmitButton
+                          disabled={free === 0}
+                          title={free === 0 ? "No spot is free" : undefined}
+                          confirm={`Give ${row.first_name} ${row.last_name} a spot? They are emailed straight away with a payment deadline.`}
+                        >
+                          Promote
+                        </SubmitButton>
+                      </form>
+                      {/* The waitlist had no way off it except upwards, so a
+                          rider who told the board they were out stayed on the
+                          list and got promoted weeks later. */}
+                      <form action={cancelSignup}>
+                        <input type="hidden" name="signupId" value={row.id} />
+                        <SubmitButton
+                          variant="quiet"
+                          confirm={`Take ${row.first_name} ${row.last_name} off the waitlist? They are not told, and they would have to enter again.`}
+                        >
+                          Remove
+                        </SubmitButton>
+                      </form>
+                    </div>
                   ) : null}
                 </Td>
               </tr>

@@ -54,6 +54,7 @@ export type TripPhase =
   | "upcoming"
   | "live"
   | "over"
+  | "sent"
   | "closed"
   | "cancelled"
   | "completed";
@@ -62,11 +63,19 @@ export interface PhaseInput {
   status: TripStatus;
   signup_opens_at: Date | string;
   signup_closes_at: Date | string | null;
+  results_released_at: Date | string | null;
 }
 
 export function tripPhase(trip: PhaseInput, now: number = Date.now()): TripPhase {
   if (trip.status === "cancelled") return "cancelled";
   if (trip.status === "completed") return "completed";
+  /*
+    Ahead of the status check, because sending results is what sets the status
+    to closed. Without this every published trip would report "Closed early",
+    which is the one thing it is not - and would offer to reopen signups on a
+    roster everybody has already been shown.
+  */
+  if (trip.results_released_at) return "sent";
   if (trip.status === "closed") return "closed";
   if (trip.status === "draft") return "draft";
 
@@ -82,6 +91,7 @@ export const PHASE_LABELS: Record<TripPhase, string> = {
   upcoming: "Scheduled",
   live: "Signups live",
   over: "Signups over",
+  sent: "Signups closed",
   closed: "Closed early",
   cancelled: "Cancelled",
   completed: "Completed",

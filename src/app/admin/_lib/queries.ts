@@ -218,6 +218,64 @@ export const STATUS_LABELS: Record<EffectiveStatus, string> = {
   refunded: "Refunded",
 };
 
+/** A member the board might put on a trip by hand, with their standing on it. */
+export type AddableMember = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  is_club_member: boolean;
+  is_blocked: boolean;
+  /**
+   * Their live signup status on this trip, or null if they have none. Carried
+   * so the search result can say "already on the trip" rather than offering an
+   * Add button that the transaction is going to refuse.
+   */
+  signup_status: string | null;
+};
+
+/**
+ * Members matching a search, annotated with where they already stand on one
+ * trip.
+ *
+ * Blocked members are returned rather than filtered out. Hiding them makes the
+ * board search a name, see nothing, and conclude the person never signed up -
+ * which is a different problem with a different fix. The caller shows them with
+ * no Add button.
+ */
+export async function searchAddableMembers(
+  tripId: string,
+  search: string,
+  limit = 8,
+): Promise<AddableMember[]> {
+  const term = search.trim();
+  // A blank box would otherwise return the first N of the whole club, which
+  // reads as a suggestion list rather than the answer to a question.
+  if (term.length < 2) return [];
+
+  return execute<AddableMember>(
+    `select m.id, m.first_name, m.last_name, m.email::text as email,
+            m.is_club_member, m.is_blocked,
+            s.status::text as signup_status
+       from members m
+       left join lateral (
+         select status
+           from signups
+          where trip_id = $1 and member_id = m.id
+            and status in ('held','paid','waitlisted')
+          limit 1
+       ) s on true
+      where m.email::text ilike '%' || $2 || '%'
+         or (m.first_name || ' ' || m.last_name) ilike '%' || $2 || '%'
+      -- People with no standing on this trip first: they are the ones the
+      -- board is looking for, and an exact-name match that is already on the
+      -- roster should not push the newcomer off the end of the list.
+      order by (s.status is not null), m.first_name, m.last_name
+      limit $3`,
+    [tripId, term, limit],
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------

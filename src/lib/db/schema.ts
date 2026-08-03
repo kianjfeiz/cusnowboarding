@@ -292,10 +292,18 @@ export const trips = pgTable(
     resultsReleasedBy: uuid("results_released_by").references(() => boardUsers.id),
 
     /**
-     * Set when the board declares the roster settled. A later, separate step
-     * from releasing results: outcomes go out while holds are still being paid,
-     * whereas the attendee list and photo pool should only open once the roster
-     * has stopped moving. Finalizing is what opens those.
+     * Gates the attendee list, the ride sheet and the photo pool.
+     *
+     * Written by releaseResults at the same instant as results_released_at.
+     * It was a second board action days later, so a list that was still
+     * churning would not be published - but every view behind this gate lists
+     * `status = 'paid'` only and is readable only by someone who is themselves
+     * paid, so at release the list is empty and fills as the money lands.
+     * Nobody unpaid is ever named, which was the whole reason for the delay.
+     *
+     * Kept as its own column rather than folded into results_released_at: the
+     * member-side gate should keep asking "is the roster open" rather than
+     * learning what releasing results happens to imply.
      */
     rosterFinalizedAt: timestamptz("roster_finalized_at"),
     rosterFinalizedBy: uuid("roster_finalized_by").references(() => boardUsers.id),

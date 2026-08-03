@@ -47,12 +47,18 @@ is an attribute of a person, not a separate account type.
 
 ## Roster finalization
 
-`trips.roster_finalized_at` gates the member-facing attendee list and the photo
-pool. It is a deliberate board action, not derived from the trip date: before
-it, holds are still lapsing and the waitlist is still moving, so publishing the
-list would both churn and reveal who is about to lose their spot for
-non-payment. Trip photos are visible only to people who actually went
-(`signups.status = 'paid'`) plus the board.
+`trips.roster_finalized_at` gates the member-facing attendee list, the ride
+sheet and the photo pool. It is written by `releaseResults` at the same instant
+as `results_released_at` - there is no separate "Finalize roster" button, and
+nothing derives it from the trip date.
+
+It was a second press, days later, so a list that was still churning would not
+be published. That reasoning did not survive contact with the queries: every one
+of those views lists `signups.status = 'paid'` only, and is readable only by
+someone who is themselves paid. At release the list is empty and fills as the
+money lands, so nobody unpaid is ever named. Keep both columns - the member-side
+gate reads `roster_finalized_at` and should not learn about release - but do not
+reintroduce a way to set them apart.
 
 ## The trips-row lock ordering rule
 
@@ -73,11 +79,15 @@ permuting positions in a single UPDATE collides with itself.
    strictly by server arrival order. Entrants are told only "entry received".
 2. For 15-20 minutes the board curates in the roster editor - dragging people
    in and out. This is only possible BEFORE results are released.
-3. The board sends results. This publishes outcomes AND resets every payment
-   deadline, because the window has to start when the member can act on it. The
-   expiry and reminder jobs both skip trips where `results_released_at` is null.
-4. Later, the board finalizes the roster, which opens the attendee list and
-   photo pool.
+3. The board sends results. ONE button, four effects: it closes signups, sets
+   `results_released_at`, resets every payment deadline (the window has to start
+   when the member can act on it), and finalizes the roster. All in one
+   transaction under the trips row lock, so the trip is never both published and
+   claimable. Irreversible, and the confirmation says so. The expiry and
+   reminder jobs both skip trips where `results_released_at` is null.
+4. Afterwards people drop and others take their place. Release, Cancel, Promote
+   and the "Add a rider" search are the tools; each one notifies, because the
+   roster is public by then.
 
 Members are never shown a waitlist number - the board picks from the waitlist
 rather than working down it, so a position would promise a queue that does not

@@ -85,7 +85,7 @@ export default async function TripRosterPage({
       {!entitled ? (
         <Notice title="The list is not out yet">
           {trip.rosterFinalizedAt === null
-            ? "The board is still settling this roster. Once it is final, everyone on the trip can see who else is coming."
+            ? "Results for this trip are not out yet. Once they are, everyone who is on the trip can see who else is coming."
             : "This list is shared only with the people who are on this trip."}
         </Notice>
       ) : (
