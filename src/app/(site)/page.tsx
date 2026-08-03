@@ -159,12 +159,19 @@ export default async function Home() {
           >
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
               {heroState.live ? (
-                <span aria-hidden="true" className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60 motion-reduce:animate-none" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
-                </span>
-              ) : null}
-              {heroState.live ? "Signups are open" : "Next drop"}
+                <>
+                  <span aria-hidden="true" className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60 motion-reduce:animate-none" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+                  </span>
+                  {/* The dot carries the whole message now, and it is
+                      decorative markup - so the state it stands for still has
+                      to be said somewhere a screen reader can reach. */}
+                  <span className="sr-only">Signups are open</span>
+                </>
+              ) : (
+                "Next drop"
+              )}
             </div>
 
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -180,12 +187,10 @@ export default async function Home() {
               {formatMoney(heroTrip.priceCents)} · {heroTrip.capacity} spots
             </p>
 
+            {/* Live, the button is the only thing in this row, so it sits at
+                the start rather than being pushed across a gap to nothing. */}
             <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
-              {heroState.live ? (
-                <p className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                  Good luck!
-                </p>
-              ) : (
+              {heroState.live ? null : (
                 <p className="tnum text-4xl font-semibold tracking-tight sm:text-5xl">
                   <CountdownChip
                     targetMs={heroTrip.signupOpensAt.getTime()}
