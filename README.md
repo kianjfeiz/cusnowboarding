@@ -3,8 +3,6 @@
 Trip signups and payments for the CU Boulder snowboarding club. Live at
 cusnowboarding.com.
 
-It replaces the Google Form that opened at 8pm on a Tuesday, the first-25-names
-scramble, and the weeks of DMing people for money.
 
 Next.js 15 (App Router) and TypeScript, Postgres through Drizzle, Auth.js with
 Google sign-in, hosted on Vercel with Neon. Photos go to Cloudflare R2 and mail
