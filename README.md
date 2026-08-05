@@ -1,71 +1,68 @@
 # CU Snowboarding
 
-Trip signups and payments for the CU Boulder snowboarding club, live at
-[cusnowboarding.com](https://cusnowboarding.com).
+Trip signups and payments for the CU Boulder snowboarding club. Live at
+cusnowboarding.com.
 
-Replaces the Google Form that opens at 8pm on a Tuesday, the first-25-names
+It replaces the Google Form that opened at 8pm on a Tuesday, the first-25-names
 scramble, and the weeks of DMing people for money.
 
-Next.js 15 (App Router) and TypeScript, Postgres via Drizzle, Auth.js with
-Google sign-in, deployed on Vercel with Neon. Photos live in Cloudflare R2 and
-mail goes through Resend; both are optional in development.
+Next.js 15 (App Router) and TypeScript, Postgres through Drizzle, Auth.js with
+Google sign-in, hosted on Vercel with Neon. Photos go to Cloudflare R2 and mail
+goes through Resend. Both are optional in development.
 
----
+## Core functionality
 
-## The drop
+Signups open at a set time and everyone races for a fixed number of spots.
 
-The whole product is one moment: signups open, a hundred people hit the button,
-and 25 spots are allocated in an order nobody can argue with.
+Ordering is decided in Postgres rather than in the browser. One SQL statement
+increments a counter on the trip row. The row lock on that UPDATE serialises
+everyone claiming at once, and the value each request gets back is its arrival
+position. Capacity is then arithmetic. If n is less than or equal to capacity
+the member takes spot n, otherwise they land at waitlist position n minus
+capacity.
 
-**Ordering is decided inside Postgres, not in the browser.** A single statement
-increments a counter on the trip row; the row lock on that `UPDATE` is what
-serialises claimers, and the value each one receives is its arrival position.
-Capacity is then arithmetic: `n <= capacity` wins spot `n`, anything higher
-lands at waitlist position `n - capacity`.
-
-That statement is [`src/lib/claims/claim.ts`](src/lib/claims/claim.ts), and its
-comment is required reading before touching it. The obvious-looking
-`where (select count(*) ...) < capacity` check is **wrong** - it reads a
+That statement is in [src/lib/claims/claim.ts](src/lib/claims/claim.ts). Read
+the comment above it before changing anything. A capacity check written as
+`where (select count(*) ...) < capacity` looks correct and is not. It reads a
 snapshot and oversells under concurrency.
-[`tests/isolation.test.ts`](tests/isolation.test.ts) demonstrates that failure
-on purpose so it cannot quietly come back.
+[tests/isolation.test.ts](tests/isolation.test.ts) reproduces that failure on
+purpose so it does not come back later.
 
-Members enter by typing a phrase the board sets on the trip, not by clicking a
-button - a button rewards whatever clicks fastest, which is a script. Matching
-ignores case and spacing. Everything slow happens earlier: signing in issues a
-180-day signed cookie, and the claim route verifies it in process and goes
-straight to the statement. There is deliberately no sign-in-at-drop-time path.
+Members enter by typing a phrase the board sets on each trip instead of clicking
+a button. A button rewards whatever clicks fastest, which is a script. Matching
+ignores case and extra spaces.
 
-**Nobody is told anything until the board says so.** Entrants see "entry
-received" while the board curates the roster, then one **Send results** button
-closes signups, publishes outcomes, resets every payment deadline, and opens the
-attendee list - all in one transaction. Members never see a waitlist number: the
-board picks from the waitlist rather than working down it.
+The slow work all happens before the drop. Signing in issues a signed cookie
+that lasts 180 days. At claim time the route verifies that cookie in process and
+goes straight to the SQL statement. There is no way to sign in during a drop.
 
-Board members ride free and off-capacity. Capacity 25 means 25 paying riders
-plus however many of the board are coming.
+Entrants see only "entry received" until the board publishes. The board curates
+the roster first, then presses Send results once. That closes signups, publishes
+outcomes, resets every payment deadline, and opens the attendee list, all in one
+transaction. Members never see a waitlist number, because the board picks from
+the waitlist instead of working down it in order.
 
----
+Board members ride free and do not count against capacity. A capacity of 25
+means 25 paying riders plus however many board members are coming.
 
-## Money is not handled here
+## Payments
 
-The club bills through CU's Fusion club-sports portal, as the school requires.
-Fusion has **no public API**, so this app cannot observe payment and does not
-pretend to.
+The club bills through CU's Fusion club-sports portal because the school
+requires it. Fusion has no public API, so this app cannot see whether anyone has
+paid.
 
-- **Fusion owns the money.** Members are sent there by a link
-  (`trips.payment_url`, falling back to `NEXT_PUBLIC_PAYMENT_URL`).
-- **This app owns the roster and the deadline.** `signups.status = 'paid'`
-  records the treasurer reconciling a payment, not one being observed.
+Fusion owns the money. Members are sent there by a link stored in
+`trips.payment_url`, which falls back to `NEXT_PUBLIC_PAYMENT_URL`.
 
-That gap is real and the UI says so - paying and being marked paid are separate
-events, minutes or days apart. Do not build for a webhook; there isn't one.
+This app owns the roster and the deadline. Setting `signups.status` to `paid`
+records that the treasurer reconciled a payment, not that one was observed.
 
----
+Paying and being marked paid are separate events that can be days apart, and the
+member-facing copy says so. There is no webhook to build against.
 
 ## Local development
 
-Requires Node 22+ and Docker.
+Needs Node 22+ and Docker.
 
 ```bash
 npm install
@@ -76,19 +73,18 @@ npm run db:seed
 npm run dev
 ```
 
-Generate secrets with `openssl rand -base64 32`. With no `RESEND_API_KEY`, all
-mail is printed to the server log instead of sent, so the full flow works
-offline. The seed creates two trips, 200 verified members, the board roles and
-one superadmin, and refuses to run against a non-local database.
+Generate secrets with `openssl rand -base64 32`. Without a `RESEND_API_KEY` all
+mail is printed to the server log instead of sent, so the whole flow works
+offline. The seed creates two trips, 200 verified members, the board roles, and
+one superadmin. It refuses to run against a non-local database.
 
-Sign-in is Google only, in every environment. There is no local bypass on
-purpose: a second route to a session is a second route to get wrong.
+Sign-in is Google only in every environment. There is no local bypass, so
+development exercises the same path members use.
 
-**The app always talks to PgBouncer in transaction mode**, matching Neon in
-production; migrations and seeding use the direct connection. Testing through
-the pooler is the only way to prove the claim statement is safe there.
-
----
+The app always connects through PgBouncer in transaction mode, which matches
+Neon in production. Migrations and seeding use the direct connection instead.
+Running the tests through the pooler is the only way to show the claim statement
+is safe there.
 
 ## Tests
 
@@ -98,38 +94,33 @@ npm run test:race                           # the concurrency suite
 RACE_ITERATIONS=200 npm run test:race       # full soak before a real drop
 ```
 
-The race suite fires 100 pre-warmed connections through PgBouncer at a
-capacity-25 trip and asserts exactly 25 held with spot numbers `1..25`, 75
-waitlisted with contiguous positions, a gapless total ordering, and no
-duplicates. It runs 25 iterations by default, because a single green run of a
-race test proves nothing.
+The race suite opens 100 pre-warmed connections through PgBouncer and fires them
+at a trip with 25 spots. It asserts 25 held rows numbered 1 through 25, 75
+waitlisted rows with contiguous positions, a gapless total ordering, and no
+duplicates. It runs 25 iterations by default, since one passing run of a race
+test does not show much.
 
-Also covered: ordering under stagger, duplicate storms, waitlist caps, crash
-safety mid-burst, expiry grace periods, comped board seats, and concurrent
-promotions competing for one spot.
-
----
+The suite also covers ordering under stagger, duplicate storms, waitlist caps,
+crash safety mid-burst, expiry grace periods, comped board seats, and concurrent
+promotions competing for the same spot.
 
 ## Deploying
 
-[`docs/DEPLOY.md`](docs/DEPLOY.md) is the full runbook - Vercel, Neon, Resend,
-Google OAuth, R2 CORS, cron, and the one-time `board:bootstrap` that breaks the
-chicken-and-egg of an admin gated on a table only the admin can write to.
+[docs/DEPLOY.md](docs/DEPLOY.md) has the full runbook for Vercel, Neon, Resend,
+Google OAuth, R2 CORS, cron, and the one-time `board:bootstrap` script.
+Bootstrap exists because the admin is gated on a table that only the admin can
+write to.
 
-Two things that bite:
-
-- **The database must sit next to the functions.** The claim route pins
-  `preferredRegion = "iad1"`, so Neon belongs in AWS `us-east-1`.
-- **Vercel Hobby caps crons at once per day**, and a `*/15` schedule in
-  `vercel.json` is a hard build failure. `.github/workflows/cron.yml` provides
-  the real cadence instead.
-
----
+Two things to watch. The database needs to sit in the same region as the
+functions, so Neon goes in AWS us-east-1 to match the `iad1` the claim route is
+pinned to. And Vercel Hobby allows only one cron run per day, where a `*/15`
+schedule in `vercel.json` fails the build outright, so
+`.github/workflows/cron.yml` runs the real cadence instead.
 
 ## Before changing anything
 
-[`CLAUDE.md`](CLAUDE.md) holds the invariants - what the claim statement may
-never grow, the lock ordering every write follows, why board seats are shaped
-the way they are, and which columns are load-bearing. The comments in
-`src/lib/claims/claim.ts` and `src/lib/promotion.ts` are long for the same
-reason: both are easy to "simplify" into a bug.
+[CLAUDE.md](CLAUDE.md) lists the invariants. It covers what the claim statement
+must not grow, the lock ordering every write follows, how board seats are shaped
+and why, and which columns are load-bearing. The comments in
+`src/lib/claims/claim.ts` and `src/lib/promotion.ts` are long because both are
+easy to simplify into a bug.
