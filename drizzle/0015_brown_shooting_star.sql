@@ -1,0 +1,2 @@
+ALTER TABLE "member_dues" ADD COLUMN "waived" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "member_dues" ADD CONSTRAINT "member_dues_waived_free" CHECK (not "member_dues"."waived" or "member_dues"."amount_cents" = 0);

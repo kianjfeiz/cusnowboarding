@@ -6,6 +6,7 @@ import {
   getDuesStatus,
   getDuesStatusFor,
   seasonLabel,
+  waiveBoardDues,
 } from "@/lib/dues";
 import { pool } from "@/lib/db";
 import { setupPool } from "./helpers";
@@ -28,7 +29,26 @@ async function recordSeason(memberId: string, year: number, cents: number) {
   );
 }
 
+async function makeBoardMember(
+  label: string,
+  opts: { active?: boolean } = {},
+): Promise<{ memberId: string; email: string }> {
+  const email = `dues-board-${label}-${Date.now()}-${Math.trunc(performance.now())}@colorado.edu`;
+  const { rows } = await setupPool.query<{ id: string }>(
+    `insert into members (email, first_name, last_name, email_verified_at)
+     values ($1, 'Dues', $2, now()) returning id`,
+    [email, label],
+  );
+  await setupPool.query(`insert into board_users (email, name, is_active) values ($1, $2, $3)`, [
+    email,
+    `Board ${label}`,
+    opts.active ?? true,
+  ]);
+  return { memberId: rows[0].id, email };
+}
+
 afterAll(async () => {
+  await setupPool.query(`delete from board_users where email like 'dues-%@colorado.edu'`);
   await setupPool.query(`delete from members where email like 'dues-%@colorado.edu'`);
   await setupPool.end();
   await pool.end();
@@ -107,6 +127,91 @@ describe("dues rates", () => {
 
   test("an empty batch does not query", async () => {
     expect((await getDuesStatusFor([])).size).toBe(0);
+  });
+});
+
+describe("board waivers", () => {
+  test("an active board member is comped and flagged, with no money recorded", async () => {
+    const { memberId, email } = await makeBoardMember("comp");
+
+    expect(await waiveBoardDues(email)).toBe(1);
+
+    const status = await getDuesStatus(memberId);
+    expect(status.paidThisSeason).toBe(true);
+    expect(status.waivedThisSeason).toBe(true);
+    expect(status.owedCents).toBe(0);
+
+    const { rows } = await setupPool.query(
+      `select d.amount_cents, d.waived, d.provider, m.is_club_member
+         from member_dues d join members m on m.id = d.member_id
+        where d.member_id = $1 and d.term_year = $2`,
+      [memberId, season],
+    );
+    expect(rows[0]).toMatchObject({
+      amount_cents: 0,
+      waived: true,
+      provider: "board",
+      is_club_member: true,
+    });
+  });
+
+  test("waiving twice records nothing new", async () => {
+    const { email } = await makeBoardMember("twice");
+
+    expect(await waiveBoardDues(email)).toBe(1);
+    expect(await waiveBoardDues(email)).toBe(0);
+  });
+
+  test("a season already paid stays money; only the flag catches up", async () => {
+    // Converting recorded money into a comp would write off a refund the
+    // treasurer never issued - mirrors compBoardMembers leaving paid rows alone.
+    const { memberId, email } = await makeBoardMember("paid-first");
+    await recordSeason(memberId, season, NEW_MEMBER_DUES_CENTS);
+    await setupPool.query(`update members set is_club_member = false where id = $1`, [memberId]);
+
+    expect(await waiveBoardDues(email)).toBe(0);
+
+    const status = await getDuesStatus(memberId);
+    expect(status.paidThisSeason).toBe(true);
+    expect(status.waivedThisSeason).toBe(false);
+
+    const { rows } = await setupPool.query(`select is_club_member from members where id = $1`, [
+      memberId,
+    ]);
+    expect(rows[0].is_club_member).toBe(true);
+  });
+
+  test("an inactive board user is not comped", async () => {
+    const { memberId, email } = await makeBoardMember("inactive", { active: false });
+
+    expect(await waiveBoardDues(email)).toBe(0);
+    expect((await getDuesStatus(memberId)).owedCents).toBe(NEW_MEMBER_DUES_CENTS);
+  });
+
+  test("a priced waiver is unrepresentable", async () => {
+    const id = await makeMember("waiver-shape");
+
+    await expect(
+      setupPool.query(
+        `insert into member_dues (member_id, term_year, amount_cents, waived)
+         values ($1, $2, 100, true)`,
+        [id, season],
+      ),
+    ).rejects.toThrow(/member_dues_waived_free/);
+  });
+
+  test("a waived season still counts as returning later", async () => {
+    // Someone who leaves the board is a returning member, not a newcomer.
+    const id = await makeMember("ex-board");
+    await setupPool.query(
+      `insert into member_dues (member_id, term_year, amount_cents, waived)
+       values ($1, $2, 0, true)`,
+      [id, season - 1],
+    );
+
+    const status = await getDuesStatus(id);
+    expect(status.returning).toBe(true);
+    expect(status.owedCents).toBe(RETURNING_MEMBER_DUES_CENTS);
   });
 });
 

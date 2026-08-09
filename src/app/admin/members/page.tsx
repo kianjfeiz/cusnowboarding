@@ -101,7 +101,9 @@ export default async function MembersPage({
                     </Td>
                     <Td>
                       {member.is_club_member ? (
-                        <Badge emphasis="muted">Paid</Badge>
+                        <Badge emphasis="muted">
+                          {dues.get(member.id)?.waivedThisSeason ? "Waived" : "Paid"}
+                        </Badge>
                       ) : (
                         <Badge>Not paid</Badge>
                       )}
@@ -114,6 +116,9 @@ export default async function MembersPage({
                         {(() => {
                           const status = dues.get(member.id);
                           if (!status) return null;
+                          // "Paid" here would send the treasurer hunting for
+                          // money that never arrived.
+                          if (status.waivedThisSeason) return "Board - dues waived";
                           if (status.paidThisSeason) {
                             return status.returning ? "Returning" : "First season";
                           }

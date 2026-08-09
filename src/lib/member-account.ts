@@ -1,4 +1,5 @@
 import { execute } from "@/lib/db";
+import { waiveBoardDues } from "@/lib/dues";
 
 /**
  * Links a Google identity to a `members` row.
@@ -86,6 +87,12 @@ export async function linkGoogleMember(identity: GoogleIdentity): Promise<Linked
     [member.id],
   );
   if (blocked[0]?.is_blocked) return null;
+
+  // Board members do not pay dues, and sign-in is the catch-up point: a board
+  // user added before ever signing in had no members row to waive until now.
+  // Also what re-comps the board after a season reset clears the flags. A cheap
+  // indexed no-op for everyone else, and this runs at sign-in, not per request.
+  await waiveBoardDues(member.email);
 
   return member;
 }

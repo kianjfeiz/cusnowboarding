@@ -146,6 +146,16 @@ Whoever is not actually coming is removed during curation, which costs no member
 anything. **Nothing here emails the board** - they are not told about the trips
 they run.
 
+Dues are comped the same way. `waiveBoardDues` in `src/lib/dues.ts` writes a
+`member_dues` row with `waived = true` and amount zero (`member_dues_waived_free`
+enforces the zero) and sets `is_club_member`, so the claim's dues gate stays a
+flag read and never learns about the board. It runs when a board user is added
+or reactivated, and on every Google sign-in - which is what catches a board
+member whose member row did not exist when they were added, and what re-comps
+the board after a season reset. A season already recorded as money is left
+alone, and leaving the board claws nothing back; "Clear dues" is the manual
+override. A waived season still counts toward the returning rate.
+
 ## Two counters, different jobs
 
 - `trips.claim_counter` - arrival **order**. May have gaps by design.

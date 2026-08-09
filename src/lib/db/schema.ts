@@ -136,7 +136,7 @@ export const members = pgTable(
     nameConfirmedAt: timestamptz("name_confirmed_at"),
     /** Null means unverified, which means they cannot claim a spot. */
     emailVerifiedAt: timestamptz("email_verified_at"),
-    /** Dues paid. Imported by the treasurer from the club roster. */
+    /** Dues settled: paid (imported by the treasurer) or waived (board). */
     isClubMember: boolean("is_club_member").notNull().default(false),
     isBlocked: boolean("is_blocked").notNull().default(false),
     /** Bumping this invalidates every csc_member cookie issued to this member. */
@@ -176,6 +176,11 @@ export const members = pgTable(
  *
  * Recording dues writes here AND sets the flag; a new season starts with the
  * flag cleared and the history intact.
+ *
+ * Board members do not pay dues. Their season is a `waived` row with amount
+ * zero, written by `waiveBoardDues` in src/lib/dues.ts - a real row, because
+ * the returning-rate history must not develop holes for the years someone
+ * served on the board.
  */
 export const memberDues = pgTable(
   "member_dues",
@@ -187,8 +192,14 @@ export const memberDues = pgTable(
     /** 2026 means the 2026-27 season, matching board_user_roles.term_year. */
     termYear: integer("term_year").notNull(),
     amountCents: integer("amount_cents").notNull(),
-    /** fusion | venmo | cash | check | other */
+    /** fusion | venmo | cash | check | other; 'board' on waived rows */
     provider: text("provider").notNull().default("fusion"),
+    /**
+     * A board member's comped season. Amount zero, enforced below: no money
+     * arrived, and this column is the record of why - the dues counterpart of
+     * `signups.board_seat`. There is nothing to refund behind one.
+     */
+    waived: boolean("waived").notNull().default(false),
     reference: text("reference"),
     note: text("note"),
     recordedBy: uuid("recorded_by").references(() => boardUsers.id),
@@ -200,6 +211,8 @@ export const memberDues = pgTable(
     uniqueIndex("member_dues_one_per_season").on(t.memberId, t.termYear),
     index("member_dues_member_idx").on(t.memberId, t.termYear.desc()),
     check("member_dues_amount_nonneg", sql`${t.amountCents} >= 0`),
+    /** A waiver is free by definition; a priced one would be a lie in the books. */
+    check("member_dues_waived_free", sql`not ${t.waived} or ${t.amountCents} = 0`),
   ],
 );
 

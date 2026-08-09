@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { execute } from "@/lib/db";
 import { ROLE_KEYS, currentTermYear, type RoleKey } from "@/lib/authz";
+import { waiveBoardDues } from "@/lib/dues";
 import { requireCapability } from "../_lib/actor";
 import { recordAudit } from "../_lib/audit";
 
@@ -83,12 +84,16 @@ export async function addBoardUser(
     };
   }
 
+  // Joining the board settles this season's dues. A no-op until they have
+  // signed in at least once; linkGoogleMember catches them up when they do.
+  const duesWaived = await waiveBoardDues(email);
+
   await recordAudit({
     actorBoardUserId: actor.boardUserId,
     action: "board_user.add",
     entityType: "board_user",
     entityId: created.id,
-    data: { email, name },
+    data: { email, name, duesWaived },
   });
 
   refreshSettings();
@@ -106,12 +111,16 @@ export async function setBoardUserActive(formData: FormData): Promise<void> {
 
   await execute(`update board_users set is_active = $2 where id = $1`, [boardUserId, active]);
 
+  // Reactivation restores the dues waiver. Deactivation deliberately does not
+  // claw one back - the season was served; "Clear dues" is the manual override.
+  const duesWaived = active ? await waiveBoardDues(target.email) : 0;
+
   await recordAudit({
     actorBoardUserId: actor.boardUserId,
     action: active ? "board_user.reactivate" : "board_user.deactivate",
     entityType: "board_user",
     entityId: boardUserId,
-    data: { email: target.email, self: boardUserId === actor.boardUserId },
+    data: { email: target.email, self: boardUserId === actor.boardUserId, duesWaived },
   });
 
   refreshSettings();
