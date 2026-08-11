@@ -134,7 +134,11 @@ function parseTripForm(formData: FormData): Parsed {
       signupClosesAt,
       signupPhrase,
       paymentWindowHours,
-      requiresDues: formData.get("requiresDues") === "on",
+      // Only the explicit "open" opens a trip to members who owe dues. A missing
+      // or unrecognised value means dues are required, so a form that failed to
+      // submit this field cannot quietly turn the gate off on a trip the board
+      // meant to restrict - the direction that would be discovered at the drop.
+      requiresDues: formData.get("requiresDues") !== "open",
       paymentUrl: text(formData, "paymentUrl") || null,
     },
   };

@@ -216,6 +216,27 @@ describe("Rejections", () => {
     await setupPool.query(`delete from members where id = $1`, [rows[0].id]);
   });
 
+  /*
+    The other half of the gate, and the half that is easy to break by accident:
+    when a trip does not require dues, owing dues must cost nothing at all. Not a
+    waitlist slot instead of a spot, not a different outcome - the same claim
+    anyone else gets. A stray `and m.is_club_member` added to member_ok would
+    still pass the test above.
+  */
+  test("a non-dues-paying member claims normally when the trip does not require dues", async () => {
+    const tripId = await createTestTrip({ capacity: 5, requiresDues: false });
+    const { rows } = await setupPool.query<{ id: string }>(
+      `insert into members (email, first_name, last_name, email_verified_at, is_club_member)
+       values ($1, 'No', 'Dues', now(), false) returning id`,
+      [`nodues-open-${Date.now()}@colorado.edu`],
+    );
+    const result = await claimSpot(clients[0], tripId, rows[0].id, generatePayToken());
+    expect(result.outcome).toBe("held");
+    expect(result.signup?.spotNumber).toBe(1);
+    await setupPool.query(`delete from signups where member_id = $1`, [rows[0].id]);
+    await setupPool.query(`delete from members where id = $1`, [rows[0].id]);
+  });
+
   test("the waitlist cap is enforced under concurrency", async () => {
     const capacity = 5;
     const waitlistCap = 5;
