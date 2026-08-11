@@ -46,9 +46,7 @@ export function TripForm({
   // every time. They stay one click away rather than in the way - but a trip that
   // already departs from them is opened, so nobody edits a field they cannot
   // see.
-  const extrasSet =
-    Boolean(defaults.resort || defaults.description || defaults.paymentUrl) ||
-    !defaults.requiresDues;
+  const extrasSet = Boolean(defaults.resort || defaults.description || defaults.paymentUrl);
 
   return (
     <form action={formAction} className="space-y-6">
@@ -129,6 +127,50 @@ export function TripForm({
             />
           </Field>
         </div>
+
+        {/*
+          Radios rather than a checkbox, and in the main section rather than
+          behind the disclosure. An unchecked checkbox submits nothing, so the
+          absent-field case had to mean "dues not required" - the fail-open
+          direction, decided by a control the board never saw. Two named options
+          make the choice explicit in the form data, which lets the parser treat
+          anything it does not recognise as "required".
+        */}
+        <fieldset>
+          <legend className="mb-1.5 text-sm font-medium text-ink">Club dues</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex items-start gap-3 rounded-md border border-border p-3 transition-colors has-[:checked]:border-border-strong has-[:checked]:bg-surface">
+              <input
+                type="radio"
+                name="requiresDues"
+                value="required"
+                defaultChecked={defaults.requiresDues}
+                className="mt-0.5 h-4 w-4 accent-accent"
+              />
+              <span className="text-sm">
+                <span className="font-medium text-ink">Dues required</span>
+                <span className="mt-0.5 block text-xs text-ink-muted">
+                  Only members with dues recorded can enter the drop.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 rounded-md border border-border p-3 transition-colors has-[:checked]:border-border-strong has-[:checked]:bg-surface">
+              <input
+                type="radio"
+                name="requiresDues"
+                value="open"
+                defaultChecked={!defaults.requiresDues}
+                className="mt-0.5 h-4 w-4 accent-accent"
+              />
+              <span className="text-sm">
+                <span className="font-medium text-ink">Open to everyone</span>
+                <span className="mt-0.5 block text-xs text-ink-muted">
+                  Anyone signed in can enter, dues paid or not.
+                </span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
       </section>
 
       <details className="rounded-lg border border-border bg-paper" open={extrasSet}>
@@ -194,21 +236,6 @@ export function TripForm({
               placeholder="https://club.fusionfamily.com/..."
             />
           </Field>
-
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              name="requiresDues"
-              defaultChecked={defaults.requiresDues}
-              className="mt-0.5 h-4 w-4 accent-accent"
-            />
-            <span className="text-sm">
-              <span className="font-medium text-ink">Dues required</span>
-              <span className="mt-0.5 block text-xs text-ink-muted">
-                Members without dues recorded cannot claim a spot on this trip.
-              </span>
-            </span>
-          </label>
         </div>
       </details>
 
