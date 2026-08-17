@@ -92,12 +92,11 @@ export default async function LoginPage({
               </Notice>
             )}
 
-            {/* ink-muted, not ink-faint: this is the answer to "which account
-                do I use", which is the question people actually arrive with.
-                The faint tone is for furniture, and it does not clear AA at
-                this size either. */}
+            {/* ink-muted, not ink-faint: this answers "which account do I
+                use", which is the question people arrive with. The faint tone
+                is for furniture, and does not clear AA at this size either. */}
             <p className="mt-4 text-center text-xs text-ink-muted">
-              Any CU Boulder address. Board access is granted separately.
+              Sign in with your CU email.
             </p>
 
             {/* Absent entirely without DEMO_PASSWORD - no form, and no provider
