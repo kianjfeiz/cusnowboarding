@@ -45,11 +45,8 @@ export default async function LoginPage({
       </div>
 
       <div className="relative w-full max-w-sm">
-        <div className="rise mb-8 flex flex-col items-center gap-3 text-center">
+        <div className="rise mb-8 flex justify-center">
           <Wordmark />
-          <p className="text-sm text-ink-muted">
-            Trips, rosters, and the drop - for the CU Boulder snowboarding club.
-          </p>
         </div>
 
         {/*
