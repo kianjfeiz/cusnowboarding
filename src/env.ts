@@ -42,8 +42,13 @@ export const env = createEnv({
      * Enables read-only demo access (src/lib/demo.ts). Optional by design:
      * unset means the demo provider is never registered, which is how a
      * deployment that should have no password door gets one.
+     *
+     * The floor is a length, not a strength check. What actually protects this
+     * is the rate limit on the sign-in action and the fact that the credential
+     * buys a read-only session with no member row behind it - see
+     * src/app/login/actions.ts.
      */
-    DEMO_PASSWORD: z.string().min(12).optional(),
+    DEMO_PASSWORD: z.string().min(10).optional(),
 
     // Cloudflare R2 for trip photos. Optional even in production: without them
     // the galleries degrade to a "not configured" notice rather than breaking
