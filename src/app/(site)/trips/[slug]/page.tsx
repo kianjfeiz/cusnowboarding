@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { Badge, Card, Notice, formatDenver, formatMoney } from "@/components/ui";
 import { AvatarStack, Avatar } from "@/components/avatar";
 import { getAttendeeFaces, isTripAttendee, listAttendees } from "@/lib/attendees";
+import { auth } from "@/auth";
 import { getMemberSession } from "@/lib/member-session";
 import { loadVerifiedMember } from "@/lib/verification";
 import { getMemberSignup, getOccupancy, getTripBySlug } from "@/lib/trips";
@@ -29,7 +30,7 @@ export default async function TripPage({ params }: { params: Promise<{ slug: str
   // everything below needs at most those two, so the page is two database
   // depths: (trip, member) then one parallel batch. Serial awaits here used to
   // stack up to six round trips.
-  const [trip, member] = await Promise.all([
+  const [trip, member, session] = await Promise.all([
     getTripBySlug(slug),
     (async () => {
       const session = await getMemberSession();
@@ -37,7 +38,10 @@ export default async function TripPage({ params }: { params: Promise<{ slug: str
         ? loadVerifiedMember(session.memberId, session.tokenVersion)
         : null;
     })(),
+    auth(),
   ]);
+
+  const isDemo = session?.user?.isDemo === true;
 
   if (!trip || trip.status === "draft") notFound();
 
@@ -155,7 +159,12 @@ export default async function TripPage({ params }: { params: Promise<{ slug: str
         />
       )}
 
-      {!member && !existingSignup ? (
+      {/*
+        A demo visitor has no member row and can never be armed - /api/member/arm
+        refuses them - so the prompt below would be a button that goes nowhere.
+        The session is already loaded for the header, so this costs no round trip.
+      */}
+      {!member && !existingSignup && !isDemo ? (
         <Card className="mt-6">
           <h2 className="text-lg font-semibold">Get ready for this drop</h2>
           <p className="mt-1 mb-5 text-sm text-ink-muted">

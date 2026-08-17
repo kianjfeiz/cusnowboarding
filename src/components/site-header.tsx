@@ -28,7 +28,12 @@ export async function SiteHeader() {
           },
         ]
       : []),
-    ...(user?.boardUserId ? [{ href: "/admin", label: "Board", icon: "admin" }] : []),
+    /* The demo carries no boardUserId by design - the token must never hold one
+       - so the Board tab is offered on the demo flag instead. What it opens is
+       the read-only actor built in admin/_lib/actor.ts. */
+    ...(user?.boardUserId || user?.isDemo
+      ? [{ href: "/admin", label: "Board", icon: "admin" }]
+      : []),
   ];
 
   return (
@@ -61,11 +66,22 @@ export async function SiteHeader() {
         <div className="ml-auto flex items-center gap-3">
           {user ? (
             <>
-              <Avatar
-                src={user.image}
-                name={user.name ?? user.email ?? "Member"}
-                size={28}
-              />
+              {/* Said plainly, because a demo visitor who forgets they are in
+                  one reads an empty "My trips" as a broken page rather than as
+                  an account that was never anybody. The Board tab is already
+                  absent above: it is gated on boardUserId, which a demo
+                  session never carries. */}
+              {user.isDemo ? (
+                <span className="rounded-md border border-border px-2 py-1 text-xs text-ink-muted">
+                  Demo
+                </span>
+              ) : (
+                <Avatar
+                  src={user.image}
+                  name={user.name ?? user.email ?? "Member"}
+                  size={28}
+                />
+              )}
               <form
                 action={async () => {
                   "use server";

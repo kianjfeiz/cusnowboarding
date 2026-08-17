@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentActor } from "../../../_lib/actor";
+import { currentActor, isDemoActor } from "../../../_lib/actor";
 import { can } from "@/lib/authz";
 import {
   STATUS_LABELS,
@@ -41,6 +41,13 @@ export async function GET(
   const actor = await currentActor();
   if (!can(actor, "viewRosters")) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  // Shut for the same reason as /admin/members: this export puts every rider's
+  // name against their email and phone number. Withholding the page while
+  // leaving its CSV open would withhold nothing.
+  if (isDemoActor(actor)) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
   const { id } = await params;

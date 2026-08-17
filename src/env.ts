@@ -38,6 +38,13 @@ export const env = createEnv({
     UPSTASH_REDIS_REST_URL: z.string().optional(),
     UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
 
+    /**
+     * Enables read-only demo access (src/lib/demo.ts). Optional by design:
+     * unset means the demo provider is never registered, which is how a
+     * deployment that should have no password door gets one.
+     */
+    DEMO_PASSWORD: z.string().min(12).optional(),
+
     // Cloudflare R2 for trip photos. Optional even in production: without them
     // the galleries degrade to a "not configured" notice rather than breaking
     // the trip pages sitting next to them.
@@ -75,6 +82,7 @@ export const env = createEnv({
     CRON_SECRET: process.env.CRON_SECRET,
     UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
     UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
+    DEMO_PASSWORD: process.env.DEMO_PASSWORD,
     R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
     R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
     R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,

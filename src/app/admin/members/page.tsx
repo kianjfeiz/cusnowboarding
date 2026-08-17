@@ -4,7 +4,8 @@ import { SubmitButton } from "@/components/admin/submit-button";
 import { Badge, Button, Input, formatMoney } from "@/components/ui";
 import { can } from "@/lib/authz";
 import { getDuesStatusFor } from "@/lib/dues";
-import { requireCapability } from "../_lib/actor";
+import { notFound } from "next/navigation";
+import { isDemoActor, requireCapability } from "../_lib/actor";
 import { listMembers } from "../_lib/queries";
 import { setMemberBlocked, setMemberDues } from "./actions";
 import { DuesImport } from "./dues-import";
@@ -25,6 +26,11 @@ export default async function MembersPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const actor = await requireCapability("viewRosters");
+
+  // The one board screen the demo does not get: a directory of real students
+  // with their emails, phone numbers and dues. notFound() rather than a redirect
+  // so the page does not advertise that it is being withheld.
+  if (isDemoActor(actor)) notFound();
 
   const { q } = await searchParams;
   const search = (q ?? "").trim();

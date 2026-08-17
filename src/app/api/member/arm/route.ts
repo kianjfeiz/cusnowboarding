@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { lookupMemberByEmail } from "@/lib/member-account";
+import { DEMO_EMAIL } from "@/lib/demo";
 import {
   MEMBER_COOKIE,
   issueMemberToken,
@@ -30,6 +31,17 @@ export async function GET(request: NextRequest) {
 
   if (!email) {
     return NextResponse.redirect(new URL("/login?error=session", request.url));
+  }
+
+  /*
+    The demo visitor never gets armed. `csc_member` is the only credential the
+    drop path reads, so a session anyone with a password can mint must not be
+    able to obtain one - otherwise a portfolio link allocates real spots. This
+    is the guard that keeps the demo entirely off the claim route, which is why
+    it lives here rather than being inferred from the absence of a member row.
+  */
+  if (session?.user?.isDemo || email === DEMO_EMAIL) {
+    return NextResponse.redirect(new URL("/", request.url));
   }
 
   // Re-read rather than trusting the token: a member blocked since sign-in must

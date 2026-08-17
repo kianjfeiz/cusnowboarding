@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { NavStrip, type NavItem } from "@/components/nav-strip";
 import { Wordmark } from "@/components/wordmark";
 import { can } from "@/lib/authz";
-import { requireActor } from "./_lib/actor";
+import { isDemoActor, requireActor } from "./_lib/actor";
 import { signOutAction } from "./_lib/session-actions";
 
 export const dynamic = "force-dynamic";
@@ -20,8 +20,11 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     { href: "/admin/trips", label: "Trips" },
     { href: "/admin/events", label: "Events" },
     { href: "/admin/payments", label: "Payments" },
-    { href: "/admin/members", label: "Members" },
   ];
+  // The members directory is the one board screen a demo visitor does not get,
+  // so it is not offered either. The page itself refuses independently - hiding
+  // a link is a courtesy, not a control.
+  if (!isDemoActor(actor)) links.push({ href: "/admin/members", label: "Members" });
   if (can(actor, "manageBoard")) links.push({ href: "/admin/settings", label: "Settings" });
 
   return (
@@ -49,6 +52,14 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <NavStrip items={links} />
 
           <div className="ml-auto flex items-center gap-3 text-xs text-ink-faint">
+            {/* Read-only is not visually obvious - every board page renders in
+                full - so it is stated rather than left to be discovered by
+                clicking a button that refuses. */}
+            {isDemoActor(actor) ? (
+              <span className="rounded-md border border-border px-2 py-1 text-ink-muted">
+                Demo - read only
+              </span>
+            ) : null}
             {/*
               The way back out. A board member is also someone who goes on trips,
               and the member site links in here - without this the board area is

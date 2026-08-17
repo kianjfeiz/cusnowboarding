@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { auth, googleLoginEnabled } from "@/auth";
 import { Button, Notice } from "@/components/ui";
 import { signInWithGoogle } from "./actions";
+import { DemoForm } from "./demo-form";
+import { demoEnabled } from "@/lib/demo";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +54,10 @@ export default async function LoginPage({
             need to be set.
           </Notice>
         )}
+
+        {/* Absent entirely without DEMO_PASSWORD - no form, and no provider
+            behind it either, so there is nothing to probe. */}
+        {demoEnabled() ? <DemoForm /> : null}
       </div>
     </main>
   );
