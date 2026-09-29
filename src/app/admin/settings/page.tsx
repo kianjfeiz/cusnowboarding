@@ -1,7 +1,7 @@
 import { PageHeader, Section } from "@/components/admin/shell";
 import { SubmitButton } from "@/components/admin/submit-button";
 import { Badge, Notice, formatDenver } from "@/components/ui";
-import { can, currentTermYear } from "@/lib/authz";
+import { can, currentTermYear } from "@/lib/auth/authz";
 import { requireActor } from "../_lib/actor";
 import { listBoardRoles, listBoardUsers, type BoardUserRow } from "../_lib/queries";
 import { AddBoardUser } from "./add-board-user";
@@ -10,11 +10,9 @@ import { assignRole, removeRole, setBoardUserActive } from "./actions";
 export const dynamic = "force-dynamic";
 
 /**
- * Roles are stored per term year, but the board never has to think in those
- * terms: last season's roles stop granting anything on their own, so the screen
- * shows only the ones in force and assigns to the current season. One row per
- * role key, keeping the earliest term still in force, because that is the row
- * doing the granting.
+ * Roles are stored per term year, but last season's stop granting anything on
+ * their own, so the screen shows only the ones in force. One row per role key,
+ * keeping the earliest term still in force: that is the row doing the granting.
  */
 function rolesInForce(
   roles: BoardUserRow["roles"],
@@ -122,7 +120,7 @@ export default async function SettingsPage() {
                             className="h-6 px-1.5"
                             confirm={`Remove ${roleLabels.get(key) ?? key} from ${user.email}?`}
                           >
-                            Remove
+                            Remove role
                           </SubmitButton>
                         </form>
                       </span>

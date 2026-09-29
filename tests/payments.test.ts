@@ -1,8 +1,8 @@
 import { describe, test, expect, afterAll } from "vitest";
 import { claimSpot } from "@/lib/claims/claim";
 import { pool } from "@/lib/db";
-import { HOLD_GRACE_MINUTES } from "@/lib/holds";
-import { classify, loadPayState, type PaySignup } from "@/lib/payments";
+import { HOLD_GRACE_MINUTES } from "@/lib/roster/holds";
+import { classify, loadPayState, type PaySignup } from "@/lib/money/payments";
 import { createTestTrip, deleteTestTrips, getMemberIds, setupPool } from "./helpers";
 
 const MINUTE = 60_000;

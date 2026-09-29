@@ -3,14 +3,16 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { execute } from "@/lib/db";
-import { grantBoardSeats } from "@/lib/board-seats";
-import { withTripLock } from "@/lib/promotion";
+import { grantBoardSeats } from "@/lib/roster/board-seats";
+import { keepCounterAtLeast, pinClaimCounter, withTripLock } from "@/lib/roster/promotion";
 import type { TripStatus } from "@/lib/db/schema";
 import { requireCapability } from "../_lib/actor";
 import { recordAudit } from "../_lib/audit";
 import { parseDenverInput } from "../_lib/datetime";
+import { text } from "../_lib/form";
+import { insertWithFreeSlug } from "../_lib/slug";
 import { canTransition } from "../_lib/trip-status";
-import { signupClosesAt as signupWindowEnd } from "@/lib/signup-window";
+import { signupClosesAt as signupWindowEnd } from "@/lib/claims/signup-window";
 
 export interface TripFormState {
   error?: string;
@@ -22,7 +24,6 @@ export interface TripFormState {
 
 interface TripValues {
   title: string;
-  slug: string;
   resort: string | null;
   description: string | null;
   departAt: Date;
@@ -38,26 +39,11 @@ interface TripValues {
   paymentUrl: string | null;
 }
 
-function text(formData: FormData, key: string): string {
-  return String(formData.get(key) ?? "").trim();
-}
-
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-}
-
 type Parsed = { ok: true; value: TripValues } | { ok: false; error: string };
 
 function parseTripForm(formData: FormData): Parsed {
   const title = text(formData, "title");
   if (!title) return { ok: false, error: "Title is required." };
-
-  const slug = slugify(text(formData, "slug") || title);
-  if (!slug) return { ok: false, error: "Could not derive a URL slug from that title." };
 
   const departAt = parseDenverInput(text(formData, "departAt"));
   if (!departAt) return { ok: false, error: "Departure date and time are required." };
@@ -122,7 +108,6 @@ function parseTripForm(formData: FormData): Parsed {
     ok: true,
     value: {
       title,
-      slug,
       resort: text(formData, "resort") || null,
       description: text(formData, "description") || null,
       departAt,
@@ -144,37 +129,15 @@ function parseTripForm(formData: FormData): Parsed {
   };
 }
 
-function isDuplicateSlug(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
-}
-
 /**
- * Refuses a capacity that is smaller than the trip already is.
- *
- * Nothing downstream re-checks this. Lowering 25 to 20 does not move anybody:
- * twenty-five riders keep spots 1 through 25 on a bus with twenty seats, every
- * count on the roster keeps agreeing with itself, and the board finds out at
- * the trailhead. `signups_unique_spot` cannot help - it stops two people
- * sharing a spot, not a spot existing above capacity.
- *
- * Both numbers matter. The count is how many people are actually allocated; the
- * highest spot number is the floor capacity may not go under, and the two differ
- * whenever a release has left a gap.
+ * Every trip mutation shows up on the same few board screens, and the
+ * member-facing home list and calendar cache trip rows under the "trips" tag.
  */
-async function allocationFloor(
-  tripId: string,
-): Promise<{ allocated: number; highestSpot: number }> {
-  const rows = await execute<{ allocated: number; highest_spot: number | null }>(
-    `select count(*)::int as allocated, max(spot_number)::int as highest_spot
-       from signups
-      where trip_id = $1 and spot_number is not null`,
-    [tripId],
-  );
-
-  return {
-    allocated: rows[0]?.allocated ?? 0,
-    highestSpot: rows[0]?.highest_spot ?? 0,
-  };
+function refreshTrips(tripId?: string): void {
+  revalidatePath("/admin/trips");
+  revalidatePath("/admin");
+  if (tripId) revalidatePath(`/admin/trips/${tripId}`);
+  revalidateTag("trips");
 }
 
 // ---------------------------------------------------------------------------
@@ -203,8 +166,7 @@ export async function createTrip(
     };
   }
 
-  let tripId: string;
-  try {
+  const created = await insertWithFreeSlug(v.title, async (slug) => {
     const rows = await execute<{ id: string }>(
       `insert into trips (
          slug, title, resort, description, depart_at, return_at, price_cents,
@@ -213,16 +175,15 @@ export async function createTrip(
        ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'scheduled',$16)
        returning id`,
       [
-        v.slug, v.title, v.resort, v.description, v.departAt, v.returnAt, v.priceCents,
+        slug, v.title, v.resort, v.description, v.departAt, v.returnAt, v.priceCents,
         v.capacity, v.waitlistCap, v.signupOpensAt, v.signupClosesAt, v.signupPhrase,
         v.paymentWindowHours, v.requiresDues, v.paymentUrl, actor.boardUserId,
       ],
     );
-    tripId = rows[0].id;
-  } catch (error) {
-    if (isDuplicateSlug(error)) return { error: `The URL slug "${v.slug}" is already taken.` };
-    throw error;
-  }
+    return rows[0].id;
+  });
+  if (!created) return { error: "The title needs at least one letter or number." };
+  const tripId = created.result;
 
   /*
     The board is on its own trips by default, comped, from the moment the trip
@@ -249,7 +210,7 @@ export async function createTrip(
     entityType: "trip",
     entityId: tripId,
     data: {
-      slug: v.slug,
+      slug: created.slug,
       title: v.title,
       capacity: v.capacity,
       priceCents: v.priceCents,
@@ -257,10 +218,7 @@ export async function createTrip(
     },
   });
 
-  revalidatePath("/admin/trips");
-  revalidatePath("/admin");
-  // The member-facing home list and calendar cache trip rows under this tag.
-  revalidateTag("trips");
+  refreshTrips();
   // Back to the list rather than the empty roster: the board's first question
   // after saving is "is it really on the schedule", and the list answers it.
   redirect("/admin/trips");
@@ -279,36 +237,35 @@ export async function updateTrip(
   if (!parsed.ok) return { error: parsed.error };
   const v = parsed.value;
 
-  const floor = await allocationFloor(tripId);
-  const required = Math.max(floor.allocated, floor.highestSpot);
-  if (v.capacity < required) {
-    return {
-      error:
-        `${floor.allocated} spot${floor.allocated === 1 ? " is" : "s are"} already allocated on this trip` +
-        (floor.highestSpot > floor.allocated ? `, the highest being spot ${floor.highestSpot}` : "") +
-        `, so capacity cannot go below ${required}. Release or cancel riders first, then lower it.`,
-    };
-  }
-
-  try {
-    await execute(
+  // Capacity is a target, so any value saves - even below who is already on the
+  // trip. What must hold is the claim arithmetic, since signups may still be
+  // open: the counter has to clear every spot already filled and every
+  // waitlist position, or raising capacity mid-drop lets a later claim derive a
+  // position that exists and every entrant after it gets an error.
+  await withTripLock(tripId, async (client) => {
+    await client.query(
       `update trips
-          set slug = $2, title = $3, resort = $4, description = $5, depart_at = $6,
-              return_at = $7, price_cents = $8, capacity = $9, waitlist_cap = $10,
-              signup_opens_at = $11, signup_closes_at = $12, signup_phrase = $13,
-              payment_window_hours = $14, requires_dues = $15, payment_url = $16,
+          set title = $2, resort = $3, description = $4, depart_at = $5,
+              return_at = $6, price_cents = $7, capacity = $8, waitlist_cap = $9,
+              signup_opens_at = $10, signup_closes_at = $11, signup_phrase = $12,
+              payment_window_hours = $13, requires_dues = $14, payment_url = $15,
               updated_at = now()
         where id = $1`,
       [
-        tripId, v.slug, v.title, v.resort, v.description, v.departAt, v.returnAt,
+        tripId, v.title, v.resort, v.description, v.departAt, v.returnAt,
         v.priceCents, v.capacity, v.waitlistCap, v.signupOpensAt, v.signupClosesAt,
         v.signupPhrase, v.paymentWindowHours, v.requiresDues, v.paymentUrl,
       ],
     );
-  } catch (error) {
-    if (isDuplicateSlug(error)) return { error: `The URL slug "${v.slug}" is already taken.` };
-    throw error;
-  }
+    const { rows } = await client.query<{ waitlisted: number; highest: number }>(
+      `select count(*) filter (where status = 'waitlisted')::int as waitlisted,
+              coalesce(max(spot_number), 0)::int as highest
+         from signups where trip_id = $1`,
+      [tripId],
+    );
+    await keepCounterAtLeast(client, tripId, rows[0].highest);
+    if (rows[0].waitlisted > 0) await pinClaimCounter(client, tripId, rows[0].waitlisted);
+  });
 
   // Price edits deliberately do not touch existing signups: signups.amount_cents
   // is a snapshot taken at claim time, so nobody's bill changes after the fact.
@@ -317,12 +274,10 @@ export async function updateTrip(
     action: "trip.update",
     entityType: "trip",
     entityId: tripId,
-    data: { slug: v.slug, capacity: v.capacity, priceCents: v.priceCents },
+    data: { capacity: v.capacity, priceCents: v.priceCents },
   });
 
-  revalidatePath("/admin/trips");
-  revalidatePath(`/admin/trips/${tripId}`);
-  revalidateTag("trips");
+  refreshTrips(tripId);
   redirect(`/admin/trips/${tripId}`);
 }
 
@@ -332,8 +287,9 @@ export async function setTripStatus(formData: FormData): Promise<void> {
   const tripId = text(formData, "tripId");
   const target = text(formData, "status") as TripStatus;
 
-  const rows = await execute<{ status: TripStatus }>(
-    `select status::text as status from trips where id = $1`,
+  const rows = await execute<{ status: TripStatus; released: boolean }>(
+    `select status::text as status, results_released_at is not null as released
+       from trips where id = $1`,
     [tripId],
   );
   const current = rows[0]?.status;
@@ -341,6 +297,18 @@ export async function setTripStatus(formData: FormData): Promise<void> {
 
   if (!canTransition(current, target)) {
     throw new Error(`Cannot move a ${current} trip to ${target}`);
+  }
+
+  /*
+    Release published the roster and closed signups in one irreversible press.
+    The generic closed->scheduled transition exists for a trip closed early by
+    hand; on a released trip it would put the claim statement back in business
+    against a roster members have already been shown. The stage logic on the
+    trip page never offers this, but the server action is what actually
+    decides.
+  */
+  if (rows[0].released && (target === "scheduled" || target === "open")) {
+    throw new Error("The roster has been released; signups cannot be reopened.");
   }
 
   await execute(`update trips set status = $2, updated_at = now() where id = $1`, [
@@ -356,84 +324,12 @@ export async function setTripStatus(formData: FormData): Promise<void> {
     data: { from: current, to: target },
   });
 
-  revalidatePath("/admin/trips");
-  revalidatePath(`/admin/trips/${tripId}`);
-  revalidatePath("/admin");
-  revalidateTag("trips");
+  refreshTrips(tripId);
 }
 
 /**
- * Files a trip away. Reversible, and it destroys nothing.
- *
- * This is the ordinary end of a trip's life on the board's screens: the roster,
- * the payments and the photos all stay exactly where they were, and the trip
- * simply stops appearing in listings - member ones included, so archiving is
- * not a board-only illusion.
- */
-export async function archiveTrip(formData: FormData): Promise<void> {
-  const actor = await requireCapability("manageTrips");
-
-  const tripId = text(formData, "tripId");
-  if (!tripId) throw new Error("Missing trip id");
-
-  const rows = await execute<{ title: string }>(
-    `update trips set archived_at = now(), archived_by = $2, updated_at = now()
-      where id = $1 and archived_at is null
-      returning title`,
-    [tripId, actor.boardUserId],
-  );
-  if (rows.length === 0) throw new Error("That trip no longer exists, or is already archived.");
-
-  await recordAudit({
-    actorBoardUserId: actor.boardUserId,
-    action: "trip.archive",
-    entityType: "trip",
-    entityId: tripId,
-    data: { title: rows[0].title },
-  });
-
-  revalidatePath("/admin/trips");
-  revalidatePath("/admin/trips/archive");
-  revalidatePath("/admin");
-  revalidateTag("trips");
-}
-
-/** Puts an archived trip back on the board's list, and members' too. */
-export async function restoreTrip(formData: FormData): Promise<void> {
-  const actor = await requireCapability("manageTrips");
-
-  const tripId = text(formData, "tripId");
-  if (!tripId) throw new Error("Missing trip id");
-
-  const rows = await execute<{ title: string }>(
-    `update trips set archived_at = null, archived_by = null, updated_at = now()
-      where id = $1 and archived_at is not null
-      returning title`,
-    [tripId],
-  );
-  if (rows.length === 0) throw new Error("That trip no longer exists, or is not archived.");
-
-  await recordAudit({
-    actorBoardUserId: actor.boardUserId,
-    action: "trip.restore",
-    entityType: "trip",
-    entityId: tripId,
-    data: { title: rows[0].title },
-  });
-
-  revalidatePath("/admin/trips");
-  revalidatePath("/admin/trips/archive");
-  revalidatePath("/admin");
-  revalidateTag("trips");
-}
-
-/**
- * Destroys an archived trip and everything hanging off it.
- *
- * Only reachable from the archive, and the `archived_at is not null` guard is
- * what enforces that rather than the UI - deletion is never one click away
- * from the live list. Archiving first is the deliberate pause: it is the step
- * that makes this a decision rather than a mis-click on a busy row.
+ * Destroys a trip and everything hanging off it. There is no undo and no
+ * softer alternative - the confirmation on the trips list is the only pause.
  *
  * What actually dies: every child table cascades off `trips` - signups, and
  * through them payments, plus photos and the ride sheet. For a trip that ran,
@@ -453,15 +349,12 @@ export async function deleteTrip(formData: FormData): Promise<void> {
   if (!tripId) throw new Error("Missing trip id");
 
   const photos = await execute<{ storage_key: string; thumbnail_key: string | null }>(
-    `select p.storage_key, p.thumbnail_key
-       from trip_photos p
-       join trips t on t.id = p.trip_id
-      where p.trip_id = $1 and t.archived_at is not null`,
+    `select storage_key, thumbnail_key from trip_photos where trip_id = $1`,
     [tripId],
   );
 
   if (photos.length > 0) {
-    const { deleteObject } = await import("@/lib/storage/r2");
+    const { deleteObject } = await import("@/lib/photos/r2");
     for (const photo of photos) {
       for (const key of [photo.storage_key, photo.thumbnail_key]) {
         if (key) await deleteObject(key);
@@ -471,14 +364,14 @@ export async function deleteTrip(formData: FormData): Promise<void> {
 
   const rows = await execute<{ title: string; slug: string; signups: number }>(
     `delete from trips
-      where id = $1 and archived_at is not null
+      where id = $1
       returning title, slug,
         (select count(*)::int from signups where trip_id = $1) as signups`,
     [tripId],
   );
 
   if (rows.length === 0) {
-    throw new Error("A trip has to be archived before it can be deleted.");
+    throw new Error("That trip no longer exists.");
   }
 
   await recordAudit({
@@ -495,9 +388,6 @@ export async function deleteTrip(formData: FormData): Promise<void> {
     },
   });
 
-  revalidatePath("/admin/trips");
-  revalidatePath("/admin/trips/archive");
-  revalidatePath("/admin");
-  revalidateTag("trips");
-  redirect("/admin/trips/archive");
+  refreshTrips();
+  redirect("/admin/trips");
 }

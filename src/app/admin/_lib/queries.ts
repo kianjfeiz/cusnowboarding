@@ -1,7 +1,7 @@
 import { execute } from "@/lib/db";
 import type { TripStatus } from "@/lib/db/schema";
-import { HOLD_GRACE_INTERVAL, HOLD_GRACE_MINUTES } from "@/lib/holds";
-import { NOT_ARCHIVED } from "@/lib/trip-scope";
+import { HOLD_GRACE_INTERVAL, HOLD_GRACE_MINUTES } from "@/lib/roster/holds";
+import { NOT_ARCHIVED } from "@/lib/trips/trip-scope";
 
 /**
  * Read models for the admin.
@@ -13,7 +13,7 @@ import { NOT_ARCHIVED } from "@/lib/trip-scope";
  * sees the real number of free spots at all times.
  */
 
-export type TripRow = {
+export type TripSummary = {
   id: string;
   slug: string;
   title: string;
@@ -33,16 +33,8 @@ export type TripRow = {
   signup_closes_at: Date | null;
   /** Typed by members to enter the drop; chosen by the board on the trip form. */
   signup_phrase: string;
-  claim_counter: number;
-  /** Non-null once the board opens the attendee list and photo pool to members. */
-  roster_finalized_at: Date | null;
   /** Non-null once outcomes have been published; members see nothing before. */
   results_released_at: Date | null;
-  /** Non-null once filed away. Hidden from every live listing; see listTrips. */
-  archived_at: Date | null;
-};
-
-export type TripSummary = TripRow & {
   paid: number;
   held: number;
   /** Holds whose deadline has already passed - a spot the board can reclaim. */
@@ -76,8 +68,7 @@ const TRIP_COLUMNS = `
   t.id, t.slug, t.title, t.resort, t.status::text as status, t.capacity,
   t.waitlist_cap, t.price_cents, t.payment_window_hours, t.requires_dues, t.payment_url,
   t.description, t.depart_at, t.return_at, t.signup_opens_at, t.signup_closes_at,
-  t.claim_counter::int as claim_counter, t.roster_finalized_at,
-  t.results_released_at, t.archived_at, t.signup_phrase
+  t.results_released_at, t.signup_phrase
 `;
 
 /*
@@ -104,40 +95,22 @@ const TRIP_COUNTS = `
   ) c on true
 `;
 
-/**
- * Every trip still in play. Archived rows are excluded here rather than
- * filtered by each caller, so a page added later cannot forget and resurrect a
- * filed trip onto the dashboard.
- */
-export async function listTrips(): Promise<TripSummary[]> {
+function selectTrips(tail: string, params: unknown[] = []): Promise<TripSummary[]> {
   return execute<TripSummary>(
     `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups, c.board_seats
        from trips t
        ${TRIP_COUNTS}
-      where ${NOT_ARCHIVED}
-      order by t.signup_opens_at desc`,
+      ${tail}`,
+    params,
   );
 }
 
-/** Most recently filed first - the archive is read newest-first when read at all. */
-export async function listArchivedTrips(): Promise<TripSummary[]> {
-  return execute<TripSummary>(
-    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups, c.board_seats
-       from trips t
-       ${TRIP_COUNTS}
-      where t.archived_at is not null
-      order by t.archived_at desc`,
-  );
+export function listTrips(): Promise<TripSummary[]> {
+  return selectTrips(`where ${NOT_ARCHIVED} order by t.signup_opens_at desc`);
 }
 
 export async function getTripSummary(id: string): Promise<TripSummary | null> {
-  const rows = await execute<TripSummary>(
-    `select ${TRIP_COLUMNS}, c.paid, c.held, c.lapsed, c.waitlisted, c.signups, c.board_seats
-       from trips t
-       ${TRIP_COUNTS}
-      where t.id = $1`,
-    [id],
-  );
+  const rows = await selectTrips(`where t.id = $1`, [id]);
   return rows[0] ?? null;
 }
 
@@ -166,10 +139,8 @@ export type RosterRow = {
   is_club_member: boolean;
   /** Comped board rider: free, and not one of the trip's spots. */
   board_seat: boolean;
+  /** Status of the newest recorded payment. Null if none recorded. */
   payment_status: string | null;
-  /** How the money arrived, from the recorded payment. Null if none recorded. */
-  payment_provider: string | null;
-  payment_reference: string | null;
 };
 
 export async function getRoster(tripId: string): Promise<RosterRow[]> {
@@ -180,12 +151,11 @@ export async function getRoster(tripId: string): Promise<RosterRow[]> {
             s.board_seat,
             m.id as member_id, m.first_name, m.last_name, m.email::text as email,
             m.phone, m.is_club_member,
-            p.status::text as payment_status, p.provider as payment_provider,
-            p.reference as payment_reference
+            p.status::text as payment_status
        from signups s
        join members m on m.id = s.member_id
        left join lateral (
-         select status, provider, reference
+         select status
            from payments
           where signup_id = s.id
           order by created_at desc
@@ -223,12 +193,17 @@ export function effectiveStatus(row: RosterRow, now: number = Date.now()): Effec
   return row.status as EffectiveStatus;
 }
 
+/**
+ * The same words as PAYMENT_STATE_LABELS, so a rider reads the same on the
+ * roster, on Payments and in both CSVs. `expired` reads "Removed", after the
+ * button that produces it, so "released" only ever means the roster going out.
+ */
 export const STATUS_LABELS: Record<EffectiveStatus, string> = {
   paid: "Paid",
-  held: "Holding",
+  held: "Unpaid",
   lapsed: "Hold lapsed",
   waitlisted: "Waitlisted",
-  expired: "Released",
+  expired: "Removed",
   cancelled: "Cancelled",
   refunded: "Refunded",
 };
@@ -295,35 +270,6 @@ export async function searchAddableMembers(
 // Dashboard
 // ---------------------------------------------------------------------------
 
-export type UnpaidHold = {
-  signup_id: string;
-  trip_id: string;
-  trip_title: string;
-  spot_number: number | null;
-  payment_deadline_at: Date;
-  amount_cents: number;
-  first_name: string;
-  last_name: string;
-  email: string;
-};
-
-export async function listUnpaidHolds(limit = 40): Promise<UnpaidHold[]> {
-  return execute<UnpaidHold>(
-    `select s.id as signup_id, t.id as trip_id, t.title as trip_title,
-            s.spot_number, s.payment_deadline_at, s.amount_cents,
-            m.first_name, m.last_name, m.email::text as email
-       from signups s
-       join trips t on t.id = s.trip_id
-       join members m on m.id = s.member_id
-      where s.status = 'held'
-        and t.status in ('scheduled', 'open', 'closed')
-        and ${NOT_ARCHIVED}
-      order by s.payment_deadline_at asc
-      limit $1`,
-    [limit],
-  );
-}
-
 export type ReviewPayment = {
   id: string;
   signup_id: string;
@@ -370,34 +316,15 @@ export type MemberRow = {
   email: string;
   first_name: string;
   last_name: string;
-  phone: string | null;
-  email_verified_at: Date | null;
   is_club_member: boolean;
   is_blocked: boolean;
-  created_at: Date;
-  trip_count: number;
-  paid_count: number;
-  trip_titles: string | null;
 };
 
 export async function listMembers(search: string, limit = 100): Promise<MemberRow[]> {
   return execute<MemberRow>(
-    `select m.id, m.email::text as email, m.first_name, m.last_name, m.phone,
-            m.email_verified_at, m.is_club_member, m.is_blocked, m.created_at,
-            coalesce(h.trip_count, 0) as trip_count,
-            coalesce(h.paid_count, 0) as paid_count,
-            h.trip_titles
+    `select m.id, m.email::text as email, m.first_name, m.last_name,
+            m.is_club_member, m.is_blocked
        from members m
-       left join lateral (
-         select count(*)::int as trip_count,
-                count(*) filter (where s.status = 'paid')::int as paid_count,
-                string_agg(t.title, ', ' order by t.depart_at desc) as trip_titles
-           from signups s
-           join trips t on t.id = s.trip_id
-          where s.member_id = m.id
-            and s.status in ('held', 'paid', 'waitlisted')
-            and ${NOT_ARCHIVED}
-       ) h on true
       where $1::text = ''
          or m.email::text ilike '%' || $1 || '%'
          or (m.first_name || ' ' || m.last_name) ilike '%' || $1 || '%'
@@ -443,44 +370,4 @@ export type BoardRoleRow = { key: string; label: string; sort: number };
 
 export async function listBoardRoles(): Promise<BoardRoleRow[]> {
   return execute<BoardRoleRow>(`select key, label, sort from board_roles order by sort`);
-}
-
-// ---------------------------------------------------------------------------
-// Drop log
-// ---------------------------------------------------------------------------
-
-export type ClaimAttemptRow = {
-  id: number;
-  result: string;
-  claim_seq: number | null;
-  email: string | null;
-  member_id: string | null;
-  member_name: string | null;
-  ip: string | null;
-  user_agent: string | null;
-  latency_ms: number | null;
-  at_denver: string;
-  at_utc: string;
-};
-
-export async function listClaimAttempts(tripId: string, limit = 500) {
-  // The claim route logs member_id only - resolving an address there would mean
-  // another query on the drop-time path, which is exactly what that route is
-  // built to avoid. The join belongs here, where nobody is racing.
-  return execute<ClaimAttemptRow>(
-    `select a.id, a.result, a.claim_seq::int as claim_seq,
-            coalesce(a.email::text, m.email::text) as email,
-            a.member_id,
-            case when m.id is null then null
-                 else m.first_name || ' ' || m.last_name end as member_name,
-            host(a.ip) as ip, a.user_agent, a.latency_ms,
-            to_char(a.created_at at time zone 'America/Denver', 'YYYY-MM-DD HH24:MI:SS.MS') as at_denver,
-            to_char(a.created_at at time zone 'UTC', 'HH24:MI:SS.MS') as at_utc
-       from claim_attempts a
-       left join members m on m.id = a.member_id
-      where a.trip_id = $1
-      order by a.created_at asc, a.id asc
-      limit $2`,
-    [tripId, limit],
-  );
 }

@@ -23,8 +23,8 @@ export default async function NewEventPage() {
     <div className="max-w-3xl">
       <PageHeader
         title="New event"
-        subtitle="Saved as a draft. Publish it when you want members to see it."
-        back={{ href: "/admin/events", label: "Back to events" }}
+        subtitle="Saved as a draft. Publish it from the events list when members should see it."
+        back={{ href: "/admin/events", label: "Events" }}
       />
 
       <EventForm
@@ -33,7 +33,6 @@ export default async function NewEventPage() {
         cancelHref="/admin/events"
         defaults={{
           title: "",
-          slug: "",
           kind: "party",
           description: "",
           locationName: "",
@@ -42,7 +41,6 @@ export default async function NewEventPage() {
           startsAt: toDenverInput(defaultStart()),
           endsAt: "",
           allDay: false,
-          isTwentyOnePlus: false,
         }}
       />
     </div>

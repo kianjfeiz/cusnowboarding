@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { finalizePhoto } from "@/lib/photos";
-import { resolvePhotoViewer } from "../../_viewer";
+import { finalizePhoto } from "@/lib/photos/photos";
+import { resolvePhotoViewer } from "@/lib/photos/viewer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

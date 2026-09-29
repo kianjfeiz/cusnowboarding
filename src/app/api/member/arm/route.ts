@@ -1,27 +1,20 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/auth";
-import { lookupMemberByEmail } from "@/lib/member-account";
-import { DEMO_EMAIL } from "@/lib/demo";
+import { lookupMemberByEmail } from "@/lib/auth/member-account";
 import {
   MEMBER_COOKIE,
   issueMemberToken,
   memberCookieOptions,
-} from "@/lib/member-session";
+} from "@/lib/auth/member-session";
 import { safeNextPath } from "@/lib/request";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Converts a Google session into the `csc_member` claim cookie.
- *
- * The drop-time claim reads exactly one credential - that cookie - and verifies
- * it in-process with no database or network call. Teaching it to also
- * understand an Auth.js session would put a second code path on the one route
- * where latency and correctness matter most, for no gain.
- *
- * So sign-in redirects through here instead. Signing in with Google arms the
- * member for the next drop, and the claim route stays exactly as it was tested.
+ * Converts a Google session into the `csc_member` claim cookie, the only
+ * credential the claim route reads. Sign-in redirects through here so the claim
+ * path never has to learn about Auth.js sessions.
  */
 export async function GET(request: NextRequest) {
   const destination = safeNextPath(request.nextUrl.searchParams.get("next"), request.url);
@@ -33,17 +26,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/login?error=session", request.url));
   }
 
-  /*
-    The demo visitor never gets armed. `csc_member` is the only credential the
-    drop path reads, so a session anyone with a password can mint must not be
-    able to obtain one - otherwise a portfolio link allocates real spots. This
-    is the guard that keeps the demo entirely off the claim route, which is why
-    it lives here rather than being inferred from the absence of a member row.
-  */
-  if (session?.user?.isDemo || email === DEMO_EMAIL) {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
-
   // Re-read rather than trusting the token: a member blocked since sign-in must
   // not walk away with a fresh claim cookie.
   const member = await lookupMemberByEmail(email);
@@ -51,13 +33,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/login?error=no_member", request.url));
   }
 
-  /*
-    First sign-in detour: someone who has never typed their own name gets the
-    welcome page before their destination. The claim cookie is still minted on
-    THIS response - arm stays the only place that mints it - so the welcome
-    page can identify the member from the cookie like any other page, and a
-    member who abandons the form is still armed for the next drop.
-  */
+  // First sign-in detours through /welcome. The cookie is still minted on THIS
+  // response, so a member who abandons the name form is armed regardless.
   const destinationUrl =
     member.nameConfirmedAt === null
       ? new URL(`/welcome?next=${encodeURIComponent(destination)}`, request.url)

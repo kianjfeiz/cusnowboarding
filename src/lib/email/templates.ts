@@ -1,5 +1,17 @@
 import type { EmailMessage } from "./send";
 
+/**
+ * EMAIL POLICY: this app sends email in exactly two situations, both of them a
+ * board member's explicit click, and every template here belongs to one:
+ *
+ *   1. The roster release - `releaseResults` in lib/roster/results.ts, sent by
+ *      "Release roster and notify".
+ *   2. The treasurer's unpaid-riders batch on the payments page.
+ *
+ * Nothing else sends. Before adding a template, ask whether it belongs behind
+ * one of those two buttons instead.
+ */
+
 const baseUrl = () => process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
 
 const DENVER: Intl.DateTimeFormatOptions = {
@@ -15,198 +27,62 @@ const DENVER: Intl.DateTimeFormatOptions = {
 const when = (date: Date) => new Date(date).toLocaleString("en-US", DENVER);
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
-export function paymentReminderEmail(params: {
-  to: string;
-  firstName: string;
-  tripTitle: string;
-  amountCents: number;
-  deadline: Date;
-  payToken: string;
-  hoursLeft: number;
-}): EmailMessage {
-  const link = `${baseUrl()}/pay/${params.payToken}`;
-  return {
-    to: params.to,
-    subject: `Payment due for ${params.tripTitle} (${params.hoursLeft}h left)`,
-    text: [
-      `${params.firstName},`,
-      "",
-      `Your spot on ${params.tripTitle} is held but not yet paid.`,
-      "",
-      `Amount: ${money(params.amountCents)}`,
-      `Due by: ${when(params.deadline)}`,
-      "",
-      `Pay here: ${link}`,
-      "",
-      "If payment is not received by the deadline, the spot is released and",
-      "offered to the waitlist.",
-    ].join("\n"),
-  };
-}
+const message = (to: string, firstName: string, subject: string, body: string[]): EmailMessage => ({
+  to,
+  subject,
+  text: [`${firstName},`, "", ...body].join("\n"),
+});
 
-export function holdExpiredEmail(params: {
-  to: string;
-  firstName: string;
-  tripTitle: string;
-}): EmailMessage {
-  return {
-    to: params.to,
-    subject: `Your spot on ${params.tripTitle} was released`,
-    text: [
-      `${params.firstName},`,
-      "",
-      `The payment deadline for ${params.tripTitle} passed, so your spot has`,
-      "been released and offered to the waitlist.",
-      "",
-      "If you still want to go, reply to this email or reach out to the travel",
-      "coordinator - if the trip has not filled you may be able to get back on.",
-    ].join("\n"),
-  };
-}
-
-export function promotedEmail(params: {
-  to: string;
-  firstName: string;
-  tripTitle: string;
-  spotNumber: number;
-  amountCents: number;
-  deadline: Date;
-  payToken: string;
-}): EmailMessage {
-  const link = `${baseUrl()}/pay/${params.payToken}`;
-  return {
-    to: params.to,
-    subject: `You are off the waitlist for ${params.tripTitle}`,
-    text: [
-      `${params.firstName},`,
-      "",
-      `A spot opened up on ${params.tripTitle} and you are next on the waitlist.`,
-      `You now have spot ${params.spotNumber}.`,
-      "",
-      `Amount: ${money(params.amountCents)}`,
-      `Due by: ${when(params.deadline)}`,
-      "",
-      `Pay here: ${link}`,
-      "",
-      "The spot is not confirmed until payment is received, and it is released",
-      "again if the deadline passes.",
-    ].join("\n"),
-  };
+/** One row of the roster release, as `releaseResults` selects it. */
+export interface ResultRecipient {
+  email: string;
+  first_name: string;
+  status: string;
+  amount_cents: number;
+  pay_token: string;
+  payment_deadline_at: Date | null;
+  trip_title: string;
 }
 
 /**
- * Sent before a drop so members can re-arm their verification cookie on
- * whatever device they will actually be holding at signup time.
+ * Send 1: the roster release, to riders on the trip only - the waitlist is not
+ * emailed. The first time a rider is told anything beyond "entry received", so
+ * it carries everything they need to act.
  */
-export function readyForDropEmail(params: {
-  to: string;
-  firstName: string;
-  tripTitle: string;
-  opensAt: Date;
-  readyToken: string;
-  tripSlug: string;
-}): EmailMessage {
-  const link = `${baseUrl()}/ready?t=${params.readyToken}&next=/trips/${params.tripSlug}`;
-  return {
-    to: params.to,
-    subject: `Signups for ${params.tripTitle} open ${when(params.opensAt)}`,
-    text: [
-      `${params.firstName},`,
+export function resultEmail(row: ResultRecipient): EmailMessage {
+  const statusPage = `${baseUrl()}/pay/${row.pay_token}`;
+
+  // Marked paid before release. Demanding money by a deadline here would read
+  // as the club having lost their payment.
+  if (row.status === "paid") {
+    return message(row.email, row.first_name, `You are on ${row.trip_title}`, [
+      `The roster for ${row.trip_title} is out, and you are on the trip. Your`,
+      "payment is already recorded, so there is nothing to pay and nothing",
+      "more to do.",
       "",
-      `Signups for ${params.tripTitle} open at ${when(params.opensAt)}.`,
-      "",
-      "You are verified. Open this link on the device you will actually be using",
-      "at signup time, so the claim button is armed and ready:",
-      "",
-      link,
-      "",
-      "Spots are given out in the order requests reach the server. Claiming is a",
-      "single click - there is no code to enter.",
-    ].join("\n"),
-  };
+      `Your status page: ${statusPage}`,
+    ]);
+  }
+
+  return message(row.email, row.first_name, `You are on ${row.trip_title}`, [
+    `The roster for ${row.trip_title} is out, and you are on the trip.`,
+    "",
+    `Amount: ${money(row.amount_cents)}`,
+    `Due by: ${when(row.payment_deadline_at ?? new Date())}`,
+    "",
+    `Pay here: ${statusPage}`,
+    "",
+    "Your spot is not confirmed until payment is received. If the deadline",
+    "passes without payment, it goes to someone on the waitlist.",
+    "",
+    "The treasurer records payments by hand, so the site can take a few days",
+    "to show yours as paid. That is normal - you do not need to pay twice.",
+  ]);
 }
 
 /**
- * The one alert nobody may ignore: money arrived for a spot that had already
- * been released. Until a human reinstates the rider or refunds them, the club
- * is holding funds against nothing.
- */
-export function paymentNeedsReviewEmail(params: {
-  to: string;
-  memberName: string;
-  tripTitle: string;
-  amountCents: number;
-  signupStatus: string;
-  tripId: string;
-}): EmailMessage {
-  return {
-    to: params.to,
-    subject: `Action needed: payment received after hold expired (${params.tripTitle})`,
-    text: [
-      `${params.memberName} paid ${money(params.amountCents)} for ${params.tripTitle},`,
-      `but their spot was already ${params.signupStatus} when the payment landed.`,
-      "",
-      "The club is currently holding money for a spot that is not allocated.",
-      "Someone needs to either put them back on the trip or refund them.",
-      "",
-      `Review: ${baseUrl()}/admin/trips/${params.tripId}`,
-    ].join("\n"),
-  };
-}
-
-/**
- * Sent when the board puts a released rider back on a trip. Two shapes, because
- * the two cases mean opposite things to the reader: either the money already
- * arrived and there is nothing to do, or a fresh payment deadline is now running
- * against a spot they had written off.
- */
-export function reinstatedEmail(params: {
-  to: string;
-  firstName: string;
-  tripTitle: string;
-  spotNumber: number;
-  amountCents: number;
-  payToken: string;
-  deadline: Date;
-  alreadyPaid: boolean;
-}): EmailMessage {
-  const link = `${baseUrl()}/pay/${params.payToken}`;
-
-  const body = params.alreadyPaid
-    ? [
-        `Your payment of ${money(params.amountCents)} has been applied and your`,
-        "spot is confirmed. Nothing further is needed.",
-        "",
-        `Your details: ${link}`,
-      ]
-    : [
-        `Amount: ${money(params.amountCents)}`,
-        `Due by: ${when(params.deadline)}`,
-        "",
-        `Pay here: ${link}`,
-        "",
-        "The spot is not confirmed until payment is received, and it is released",
-        "again if this new deadline passes.",
-      ];
-
-  return {
-    to: params.to,
-    subject: `You are back on ${params.tripTitle}`,
-    text: [
-      `${params.firstName},`,
-      "",
-      `The board has put you back on ${params.tripTitle}. You have spot ${params.spotNumber}.`,
-      "",
-      ...body,
-    ].join("\n"),
-  };
-}
-
-/**
- * The treasurer chasing an outstanding balance. Close kin of
- * paymentReminderEmail, but sent in a batch rather than off a countdown, so it
- * states the deadline outright instead of an hours-remaining figure, and says
- * plainly when the deadline has already passed.
+ * Send 2: the treasurer's unpaid-riders batch. States the deadline outright,
+ * and says plainly when it has already passed.
  */
 export function outstandingBalanceEmail(params: {
   to: string;
@@ -217,56 +93,29 @@ export function outstandingBalanceEmail(params: {
   payToken: string;
   lapsed: boolean;
 }): EmailMessage {
-  const link = `${baseUrl()}/pay/${params.payToken}`;
-
   const tail = params.lapsed
     ? [
-        "This deadline has already passed, so the spot may be released to the",
+        "This deadline has already passed, so the spot may go to someone on the",
         "waitlist at any time. Pay now or reply to this email if you no longer",
         "want to go.",
       ]
     : [
-        "If payment is not received by the deadline, the spot is released and",
-        "offered to the waitlist.",
+        "If payment is not received by the deadline, the spot may go to someone",
+        "on the waitlist.",
       ];
 
-  return {
-    to: params.to,
-    subject: `Outstanding balance for ${params.tripTitle}`,
-    text: [
-      `${params.firstName},`,
-      "",
-      `The club has not recorded payment for your spot on ${params.tripTitle}.`,
-      "",
-      `Amount owed: ${money(params.amountCents)}`,
-      `Due by: ${when(params.deadline)}`,
-      "",
-      `Pay here: ${link}`,
-      "",
-      ...tail,
-      "",
-      "If you have already paid by cash, Venmo, or through the university,",
-      "reply to this email so the treasurer can record it.",
-    ].join("\n"),
-  };
-}
-
-export function spotsOpenedEmail(params: {
-  to: string;
-  tripTitle: string;
-  tripId: string;
-  freedCount: number;
-  waitlistDepth: number;
-}): EmailMessage {
-  const link = `${baseUrl()}/admin/trips/${params.tripId}`;
-  return {
-    to: params.to,
-    subject: `${params.tripTitle}: ${params.freedCount} spot(s) opened`,
-    text: [
-      `${params.freedCount} unpaid hold(s) on ${params.tripTitle} lapsed and were released.`,
-      `${params.waitlistDepth} member(s) are on the waitlist.`,
-      "",
-      `Promote from the waitlist here: ${link}`,
-    ].join("\n"),
-  };
+  return message(params.to, params.firstName, `Outstanding balance for ${params.tripTitle}`, [
+    `The club has not recorded payment for your spot on ${params.tripTitle}.`,
+    "",
+    `Amount owed: ${money(params.amountCents)}`,
+    `Due by: ${when(params.deadline)}`,
+    "",
+    `Pay here: ${baseUrl()}/pay/${params.payToken}`,
+    "",
+    ...tail,
+    "",
+    "The treasurer records payments by hand, so a payment from the last few",
+    "days may not show yet. If you have already paid by cash, Venmo, or",
+    "through the university, reply to this email so it can be recorded.",
+  ]);
 }

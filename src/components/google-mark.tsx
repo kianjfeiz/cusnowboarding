@@ -1,12 +1,7 @@
 /**
- * Google's four-colour G, inline rather than a remote asset so the sign-in
- * button paints with the rest of the page and works offline.
- *
- * The mark is Google's and its geometry and colours must not be altered - it is
- * reproduced here at its published proportions. It is also the only place on the
- * site where a colour outside the palette in globals.css is allowed: the palette
- * governs our own surfaces, and a recoloured G would be a worse violation than
- * four foreign hex values.
+ * Google's four-colour G, inline so it paints with the page. Its geometry and
+ * colours must not be altered, which makes this the one place a colour outside
+ * the globals.css palette is allowed.
  */
 export function GoogleMark({ size = 18 }: { size?: number }) {
   return (

@@ -38,8 +38,7 @@ export default async function NewTripPage() {
     <div className="max-w-3xl">
       <PageHeader
         title="New trip"
-        subtitle="It goes on the schedule as soon as you save. Signups open by themselves at the time you set - there is nothing to press on drop night."
-        back={{ href: "/admin/trips", label: "Back to trips" }}
+        back={{ href: "/admin/trips", label: "Trips" }}
       />
 
       <TripForm
@@ -48,7 +47,6 @@ export default async function NewTripPage() {
         cancelHref="/admin/trips"
         defaults={{
           title: "",
-          slug: "",
           resort: "",
           description: "",
           departAt: inputValue(depart, "06:00"),
@@ -59,7 +57,7 @@ export default async function NewTripPage() {
           signupPhrase: "",
           priceDollars: "85",
           capacity: "25",
-          waitlistCap: "50",
+          waitlistCap: "",
           paymentWindowHours: "48",
           requiresDues: true,
           paymentUrl: "",

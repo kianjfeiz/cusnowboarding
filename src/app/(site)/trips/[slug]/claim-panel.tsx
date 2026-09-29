@@ -1,48 +1,36 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, Notice, formatMoney } from "@/components/ui";
+import { Notice, formatCountdown } from "@/components/ui";
 
-interface ClaimResponse {
-  outcome:
-    | "held"
-    | "waitlisted"
-    | "duplicate"
-    | "not_open"
-    | "unverified"
-    | "not_member"
-    | "full"
-    | "challenge"
-    | "error";
-  signup: {
-    spotNumber: number | null;
-    waitlistPosition: number | null;
-    status: string;
-    paymentDeadlineAt: string | null;
-    payToken: string;
-    amountCents: number;
-  } | null;
-}
+/**
+ * The server answers "received" for any entry that landed - won, waitlisted or
+ * already in - and says which only in the roster release email. See the claim route.
+ */
+type Outcome =
+  | "received"
+  | "not_open"
+  | "unverified"
+  | "not_member"
+  | "full"
+  | "challenge"
+  | "error";
 
 interface Props {
   tripId: string;
   signupOpensAtMs: number;
   signupClosesAtMs: number | null;
-  armed: boolean;
-  priceCents: number;
   isOpenStatus: boolean;
-  challenge: { phrase: string; token: string } | null;
+  challenge: { phrase: string; token: string };
+  /** Who the entry will be made as, for a shared or borrowed device. */
+  enteringAs: string;
 }
 
 /**
- * Samples the server clock and returns the offset to add to Date.now().
- *
- * The lowest-round-trip sample wins, with half the round trip added back as
- * the estimated one-way delay. A member whose laptop clock is three minutes
- * fast must not see the button arm three minutes early.
- *
- * This only governs what is displayed. The server independently rejects any
- * claim arriving before signup_opens_at, so a tampered clock buys nothing.
+ * Samples the server clock and returns the offset to add to Date.now(), so a
+ * laptop clock three minutes fast does not open the form three minutes early.
+ * The lowest-round-trip sample wins. Display only: the claim statement checks
+ * signup_opens_at itself, so a tampered clock buys nothing.
  */
 async function measureClockOffset(samples = 3): Promise<number> {
   let best = Number.POSITIVE_INFINITY;
@@ -67,34 +55,20 @@ async function measureClockOffset(samples = 3): Promise<number> {
   return Number.isFinite(best) ? offset : 0;
 }
 
-function formatCountdown(ms: number): string {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const days = Math.floor(total / 86400);
-  const hours = Math.floor((total % 86400) / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-
-  if (days > 0) return `${days}d ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
-}
-
 export function ClaimPanel({
   tripId,
   signupOpensAtMs,
   signupClosesAtMs,
-  armed,
-  priceCents,
   isOpenStatus,
   challenge,
+  enteringAs,
 }: Props) {
   const [offset, setOffset] = useState(0);
   const [remaining, setRemaining] = useState(signupOpensAtMs - Date.now());
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<ClaimResponse | null>(null);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [typed, setTyped] = useState("");
   const inFlight = useRef(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,16 +103,13 @@ export function ClaimPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
-          body: JSON.stringify({ challengeToken: challenge?.token, typed: value }),
+          body: JSON.stringify({ challengeToken: challenge.token, typed: value }),
         });
-        setResult((await response.json()) as ClaimResponse);
-        // Deliberately NOT refreshing the server components here. A refresh
-        // re-renders the page with the member's signup resolved, which puts
-        // "You are in, spot 1" on screen the instant they stop typing - exactly
-        // the scoreboard this flow is meant to avoid. The entry is recorded;
-        // the outcome can wait for the email.
+        setOutcome(((await response.json()) as { outcome: Outcome }).outcome);
+        // Deliberately NOT refreshing the server components: the page must not
+        // re-render around the new signup the instant they stop typing.
       } catch {
-        setResult({ outcome: "error", signup: null });
+        setOutcome("error");
       } finally {
         setSubmitting(false);
         // Deliberately not resetting inFlight: one entry per page load.
@@ -155,158 +126,115 @@ export function ClaimPanel({
 
     // Auto-submits the instant the phrase matches. No button to hunt for, and
     // no extra click between finishing typing and the request going out.
-    if (challenge && normalize(value) === normalize(challenge.phrase)) {
+    if (normalize(value) === normalize(challenge.phrase)) {
       void claim(value);
     }
   }
 
   const block = (event: { preventDefault: () => void }) => event.preventDefault();
 
-  if (result) return <ClaimResult response={result} />;
+  if (outcome) return <ClaimResult outcome={outcome} />;
 
-  if (!armed) {
+  if ((!isOpenStatus && remaining <= 0) || closed) {
+    return <Notice title="Signups are closed" />;
+  }
+
+  if (!open) {
     return (
-      <Notice tone="alert" title="This browser is not armed">
-        Arm it before signups open, not at signup time. Until you do, entering is
-        not possible on this device.
-      </Notice>
+      <div className="rounded-lg border border-border bg-surface p-6 text-center">
+        <p className="text-sm text-ink-muted">Signups open in</p>
+        <p className="tnum mt-2 text-4xl font-semibold text-ink">{formatCountdown(remaining)}</p>
+        <p className="mt-3 text-xs text-ink-muted">
+          Keep this page open. The phrase to type appears here when signups open.
+        </p>
+        <p className="mt-1 text-xs text-ink-faint">Entering as {enteringAs}</p>
+      </div>
     );
   }
 
-  if (!isOpenStatus && remaining <= 0) {
-    return <Notice title="Signups are not open">This trip is not accepting signups.</Notice>;
-  }
-
-  if (closed) {
-    return <Notice title="Signups have closed">This trip is no longer accepting signups.</Notice>;
-  }
-
   return (
-    <div className="space-y-4">
-      {!open ? (
-        <div className="rounded-lg border border-border bg-surface p-6 text-center">
-          <p className="text-sm text-ink-muted">Signups open in</p>
-          <p className="tnum mt-2 text-4xl font-semibold text-ink">
-            {formatCountdown(remaining)}
-          </p>
-          <p className="mt-3 text-xs text-ink-faint">
-            You are ready. Keep this page open - a phrase to type appears here
-            the moment signups open.
-          </p>
-        </div>
-      ) : null}
+    <div className="rounded-lg border border-border bg-paper p-5">
+      <p className="text-sm text-ink-muted">Type this phrase to enter</p>
 
-      {open && challenge ? (
-        <div className="rounded-lg border border-border bg-paper p-5">
-          <p className="text-sm text-ink-muted">Type this to enter</p>
+      {/* Blocking copy is a speed bump, not a security control: the phrase is
+          signed and bound to this member and trip. */}
+      <p
+        onCopy={block}
+        onCut={block}
+        onContextMenu={block}
+        className="tnum mt-2 select-none rounded-md bg-surface px-4 py-3 text-center text-lg font-medium tracking-wide"
+      >
+        {challenge.phrase}
+      </p>
 
-          {/*
-            Not selectable, and copy is blocked. This is a speed bump against
-            casual copy-paste, not a security control - the real protections are
-            that the phrase is signed and bound to this member and trip, and
-            that one member can only ever hold one spot.
-          */}
-          <p
-            onCopy={block}
-            onCut={block}
-            onContextMenu={block}
-            className="tnum mt-2 select-none rounded-md bg-surface px-4 py-3 text-center text-lg font-medium tracking-wide"
-            style={{ WebkitUserSelect: "none", userSelect: "none" }}
-          >
-            {challenge.phrase}
-          </p>
+      <input
+        value={typed}
+        onChange={(e) => onType(e.target.value)}
+        onPaste={block}
+        onDrop={block}
+        disabled={submitting}
+        autoFocus
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        aria-label="Type the phrase shown above"
+        placeholder="Start typing"
+        className="mt-3 h-12 w-full rounded-md border border-border bg-paper px-3 text-center text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
+      />
 
-          <input
-            ref={inputRef}
-            value={typed}
-            onChange={(e) => onType(e.target.value)}
-            onPaste={block}
-            onDrop={block}
-            disabled={submitting}
-            autoFocus
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            aria-label="Type the phrase shown above"
-            placeholder="Start typing"
-            className="mt-3 h-12 w-full rounded-md border border-border bg-paper px-3 text-center text-base text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
-          />
-
-          <p className="mt-3 text-center text-xs text-ink-faint">
-            {formatMoney(priceCents)} · entries are ordered by when they reach our
-            server
-          </p>
-        </div>
-      ) : null}
-
-      {open && !challenge ? (
-        <Notice tone="alert" title="Reload this page">
-          This page has been open too long to enter with. Reload it to get a
-          fresh phrase.
-        </Notice>
-      ) : null}
+      <p className="mt-3 text-center text-xs text-ink-faint">Entering as {enteringAs}</p>
     </div>
   );
 }
 
-function ClaimResult({ response }: { response: ClaimResponse }) {
-  const { outcome } = response;
+const FAILURES: Record<Exclude<Outcome, "received">, { title: string; body: string }> = {
+  challenge: {
+    title: "That did not go through",
+    body: "Reload the page and enter again.",
+  },
+  full: {
+    title: "This trip is full",
+    body: "Both the trip and its waitlist are at capacity.",
+  },
+  not_open: {
+    title: "Signups are not open",
+    body: "This trip is not currently accepting signups.",
+  },
+  unverified: {
+    title: "This browser is not set up",
+    body: "Sign out and back in, then reload this page.",
+  },
+  not_member: {
+    title: "Club dues required",
+    body: "This trip is limited to members with dues paid. Contact the treasurer.",
+  },
+  error: {
+    title: "Something went wrong",
+    body: "Your entry did not go through. Reload the page and try again.",
+  },
+};
 
-  /**
-   * Deliberately says nothing about whether a spot was won.
-   *
-   * Telling people their position the instant they finish typing turns the
-   * drop into a scoreboard: everyone who missed refreshes, re-enters, and
-   * messages the board within seconds. Confirming receipt and nothing else
-   * ends the race cleanly. The real answer arrives by email and on My trips.
-   */
-  if (outcome === "held" || outcome === "waitlisted" || outcome === "duplicate") {
+function ClaimResult({ outcome }: { outcome: Outcome }) {
+  // Says nothing about whether a spot was won: confirming receipt and nothing
+  // else is what stops the drop becoming a scoreboard of refreshes.
+  if (outcome === "received") {
     return (
       <Notice tone="accent" title="Entry received">
-        <p>
-          Your entry was submitted. You will get an email shortly, and you can
-          check{" "}
-          <a className="font-medium text-accent underline underline-offset-4" href="/me">
-            My trips
-          </a>{" "}
-          any time.
-        </p>
+        If you get a spot, you get an email when the board releases the roster.
+        Either way it shows on{" "}
+        <a className="font-medium text-accent underline underline-offset-4" href="/me">
+          My trips
+        </a>{" "}
+        too.
       </Notice>
     );
   }
 
-  const messages: Record<string, { title: string; body: string }> = {
-    challenge: {
-      title: "That did not go through",
-      body: "Reload the page and enter again.",
-    },
-    full: {
-      title: "This trip is full",
-      body: "Both the trip and its waitlist are at capacity.",
-    },
-    not_open: {
-      title: "Signups are not open",
-      body: "This trip is not currently accepting signups.",
-    },
-    unverified: {
-      title: "You are not verified",
-      body: "Verify your email, then reload this page.",
-    },
-    not_member: {
-      title: "Club dues required",
-      body: "This trip is limited to members with dues paid. Contact the treasurer.",
-    },
-    error: {
-      title: "Something went wrong",
-      body: "Your spot was not claimed. Reload the page and try again.",
-    },
-  };
-
-  const message = messages[outcome] ?? messages.error;
+  const failure = FAILURES[outcome] ?? FAILURES.error;
   return (
-    <Notice tone="alert" title={message.title}>
-      {message.body}
+    <Notice tone="alert" title={failure.title}>
+      {failure.body}
     </Notice>
   );
 }

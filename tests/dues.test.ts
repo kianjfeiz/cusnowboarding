@@ -1,13 +1,12 @@
 import { describe, test, expect, afterAll } from "vitest";
-import { currentTermYear } from "@/lib/authz";
+import { currentTermYear } from "@/lib/auth/authz";
 import {
   NEW_MEMBER_DUES_CENTS,
   RETURNING_MEMBER_DUES_CENTS,
   getDuesStatus,
   getDuesStatusFor,
-  seasonLabel,
   waiveBoardDues,
-} from "@/lib/dues";
+} from "@/lib/money/dues";
 import { pool } from "@/lib/db";
 import { setupPool } from "./helpers";
 
@@ -212,12 +211,5 @@ describe("board waivers", () => {
     const status = await getDuesStatus(id);
     expect(status.returning).toBe(true);
     expect(status.owedCents).toBe(RETURNING_MEMBER_DUES_CENTS);
-  });
-});
-
-describe("season labels", () => {
-  test("reads the way the board says it", () => {
-    expect(seasonLabel(2026)).toBe("2026-27");
-    expect(seasonLabel(2099)).toBe("2099-00");
   });
 });

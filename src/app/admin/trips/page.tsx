@@ -2,16 +2,16 @@ import Link from "next/link";
 import { Badge, Button, formatDenver } from "@/components/ui";
 import { EmptyRow, PageHeader, Section, TableWrap, Td, Th } from "@/components/admin/shell";
 import { SubmitButton } from "@/components/admin/submit-button";
-import { can } from "@/lib/authz";
+import { can } from "@/lib/auth/authz";
 import { requireActor } from "../_lib/actor";
-import { listArchivedTrips, listTrips, occupancyOf, type TripSummary } from "../_lib/queries";
+import { listTrips, occupancyOf, type TripSummary } from "../_lib/queries";
 import {
   PHASE_LABELS,
   transitionLabel,
   tripPhase,
   type TripPhase,
 } from "../_lib/trip-status";
-import { archiveTrip, setTripStatus } from "./actions";
+import { deleteTrip, setTripStatus } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +28,8 @@ function rowAction(
     return { target: "scheduled", label: transitionLabel("draft", "scheduled") };
   }
   // Closing early is still worth a button: the board sometimes wants entries to
-  // stop before it is ready to publish anything. Sending results closes signups
-  // on its own, so this is a shortcut rather than a step.
+  // stop before it is ready to publish anything. Releasing the roster closes
+  // signups on its own, so this is a shortcut rather than a step.
   if (phase === "live") {
     return { target: "closed", label: transitionLabel(trip.status, "closed") };
   }
@@ -46,9 +46,39 @@ function rowAction(
   return null;
 }
 
+function stageDetail(trip: TripSummary, phase: TripPhase): string | null {
+  if (phase === "upcoming") return `Opens ${formatDenver(trip.signup_opens_at)}`;
+  if (phase === "over" || phase === "closed") return "Roster not released";
+  if (phase === "sent") {
+    // Holds still running plus holds already past their deadline: both are
+    // spots the club is owed money for.
+    const unsettled = trip.held + trip.lapsed;
+    return unsettled > 0 ? `${unsettled} unpaid` : trip.paid > 0 ? "All paid" : "Nobody paid yet";
+  }
+  return null;
+}
+
+/**
+ * Spelled out rather than summarised. A board member deleting a trip that ran
+ * should have to see the roster and payment counts they are about to destroy,
+ * and money still owed is retired with the trip rather than collected.
+ */
+function deleteConfirmation(trip: TripSummary): string {
+  const unsettled = trip.held + trip.lapsed;
+  const losses = [
+    trip.signups > 0 ? `${trip.signups} signup${trip.signups === 1 ? "" : "s"}` : null,
+    trip.paid > 0 ? `${trip.paid} paid` : null,
+    unsettled > 0 ? `${unsettled} still unpaid` : null,
+  ].filter(Boolean);
+
+  return losses.length > 0
+    ? `Delete "${trip.title}"? It has ${losses.join(", ")}. The roster, payment records and photos go with it. This cannot be undone.`
+    : `Delete "${trip.title}"? This cannot be undone.`;
+}
+
 export default async function TripsPage() {
   const actor = await requireActor();
-  const [trips, archived] = await Promise.all([listTrips(), listArchivedTrips()]);
+  const trips = await listTrips();
   const mayManage = can(actor, "manageTrips");
   const now = Date.now();
 
@@ -57,23 +87,11 @@ export default async function TripsPage() {
       <PageHeader
         title="Trips"
         actions={
-          <div className="flex items-center gap-2">
-            {/* Only offered once something is in there - an empty archive is a
-                link to an empty page. */}
-            {archived.length > 0 ? (
-              <Link
-                href="/admin/trips/archive"
-                className="inline-flex h-10 items-center rounded-md border border-border-strong px-3 text-xs font-medium hover:bg-surface sm:h-8"
-              >
-                Archive {archived.length}
-              </Link>
-            ) : null}
-            {mayManage ? (
-              <Link href="/admin/trips/new">
-                <Button>New trip</Button>
-              </Link>
-            ) : null}
-          </div>
+          mayManage ? (
+            <Link href="/admin/trips/new">
+              <Button>New trip</Button>
+            </Link>
+          ) : null
         }
       />
 
@@ -83,23 +101,20 @@ export default async function TripsPage() {
             <thead className="border-b border-border">
               <tr>
                 <Th>Trip</Th>
-                <Th>Signups</Th>
+                <Th>Stage</Th>
                 <Th className="text-right">Filled</Th>
-                <Th>Results</Th>
                 <Th />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {trips.length === 0 ? (
-                <EmptyRow colSpan={5}>No trips yet.</EmptyRow>
+                <EmptyRow colSpan={4}>No trips yet.</EmptyRow>
               ) : (
                 trips.map((trip) => {
                   const { taken } = occupancyOf(trip);
                   const phase = tripPhase(trip, now);
                   const action = rowAction(trip, phase, now);
-                  // Holds still running plus holds already past their deadline:
-                  // both are spots the club is owed money for.
-                  const unsettled = trip.held + trip.lapsed;
+                  const detail = stageDetail(trip, phase);
 
                   return (
                     <tr key={trip.id} className="hover:bg-surface">
@@ -120,11 +135,12 @@ export default async function TripsPage() {
                         <Badge emphasis={phase === "live" ? "strong" : "normal"}>
                           {PHASE_LABELS[phase]}
                         </Badge>
-                        {/* Only the drop time earns a second line. Every other
-                            phase's hint just said the badge again in a sentence. */}
-                        {phase === "upcoming" ? (
+                        {/* One line under the stage, only where it says what
+                            comes next: when the drop is, that the roster is
+                            waiting, or how much money is still out. */}
+                        {detail ? (
                           <span className="mt-0.5 block whitespace-nowrap text-xs text-ink-faint">
-                            Opens {formatDenver(trip.signup_opens_at)}
+                            {detail}
                           </span>
                         ) : null}
                       </Td>
@@ -133,36 +149,16 @@ export default async function TripsPage() {
                         <span className="tnum">
                           {taken}/{trip.capacity}
                         </span>
-                        <span className="mt-0.5 block text-xs text-ink-faint">
-                          {trip.waitlisted > 0 ? `${trip.waitlisted} waitlisted` : "No waitlist"}
-                          {trip.lapsed > 0 ? ` · ${trip.lapsed} lapsed` : ""}
-                        </span>
-                      </Td>
-
-                      <Td className="whitespace-nowrap">
-                        {/* "Roster final" used to live on the second line, back
-                            when it was a separate press. Sending results does
-                            it, so the interesting number after release is how
-                            much money is still out. */}
-                        {trip.results_released_at ? (
-                          <>
-                            <span className="text-ink">Sent</span>
-                            <span className="mt-0.5 block text-xs text-ink-faint">
-                              {unsettled > 0
-                                ? `${unsettled} unpaid`
-                                : trip.paid > 0
-                                  ? "All paid"
-                                  : "Nobody paid yet"}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-ink">Not sent</span>
-                            <span className="mt-0.5 block text-xs text-ink-faint">
-                              Entrants know nothing yet
-                            </span>
-                          </>
-                        )}
+                        {trip.waitlisted > 0 || trip.lapsed > 0 ? (
+                          <span className="mt-0.5 block text-xs text-ink-faint">
+                            {[
+                              trip.waitlisted > 0 ? `${trip.waitlisted} waitlisted` : null,
+                              trip.lapsed > 0 ? `${trip.lapsed} lapsed` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        ) : null}
                       </Td>
 
                       <Td>
@@ -186,25 +182,19 @@ export default async function TripsPage() {
                               Edit
                             </Link>
                           ) : null}
-                          {/* Archive, not delete. Nothing here is destructive
-                              and the trip comes back in one click, so it is a
-                              plain button - except when money is still owed.
-                              Archiving takes the trip out of Payments, the
-                              reminder cron and the member's own list, which
-                              would quietly retire a debt nobody settled. */}
+                          {/* The only destructive control on this list, so it
+                              always asks, and the question names what goes
+                              with the trip - this is the last moment anyone
+                              can read those counts. */}
                           {mayManage ? (
-                            <form action={archiveTrip}>
+                            <form action={deleteTrip}>
                               <input type="hidden" name="tripId" value={trip.id} />
                               <SubmitButton
-                                variant="secondary"
-                                pendingLabel="Archiving"
-                                confirm={
-                                  unsettled > 0
-                                    ? `${unsettled} spot${unsettled === 1 ? "" : "s"} on "${trip.title}" ${unsettled === 1 ? "is" : "are"} still unpaid. Archiving hides the trip from Payments and stops its reminders. Archive anyway?`
-                                    : undefined
-                                }
+                                variant="danger"
+                                pendingLabel="Deleting"
+                                confirm={deleteConfirmation(trip)}
                               >
-                                Archive
+                                Delete trip
                               </SubmitButton>
                             </form>
                           ) : null}

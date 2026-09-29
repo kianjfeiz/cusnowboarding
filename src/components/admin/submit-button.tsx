@@ -17,6 +17,9 @@ export function SubmitButton({
   variant = "secondary",
   className,
   title,
+  form,
+  name,
+  value,
 }: {
   children: string;
   pendingLabel?: string;
@@ -25,6 +28,10 @@ export function SubmitButton({
   variant?: "primary" | "secondary" | "quiet" | "danger";
   className?: string;
   title?: string;
+  /** Posts a form elsewhere on the page, e.g. a row button inside a table. */
+  form?: string;
+  name?: string;
+  value?: string;
 }) {
   const { pending } = useFormStatus();
 
@@ -37,6 +44,9 @@ export function SubmitButton({
       type="submit"
       variant={variant}
       title={title}
+      form={form}
+      name={name}
+      value={value}
       onClick={onClick}
       disabled={disabled || pending}
       className={cn("h-8 px-3 text-xs", className)}

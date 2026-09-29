@@ -3,7 +3,6 @@
 Trip signups and payments for the CU Boulder snowboarding club. Live at
 cusnowboarding.com.
 
-
 Next.js 15 (App Router) and TypeScript, Postgres through Drizzle, Auth.js with
 Google sign-in, hosted on Vercel with Neon. Photos go to Cloudflare R2 and mail
 goes through Resend. Both are optional in development.
@@ -47,16 +46,13 @@ means 25 paying riders plus however many board members are coming.
 
 The club bills through CU's Fusion club-sports portal because the school
 requires it. Fusion has no public API, so this app cannot see whether anyone has
-paid.
+paid, and there is no webhook to build against.
 
 Fusion owns the money. Members are sent there by a link stored in
-`trips.payment_url`, which falls back to `NEXT_PUBLIC_PAYMENT_URL`.
-
-This app owns the roster and the deadline. Setting `signups.status` to `paid`
-records that the treasurer reconciled a payment, not that one was observed.
-
-Paying and being marked paid are separate events that can be days apart, and the
-member-facing copy says so. There is no webhook to build against.
+`trips.payment_url`, which falls back to `NEXT_PUBLIC_PAYMENT_URL`. This app
+owns the roster and the deadline. Setting `signups.status` to `paid` records
+that the treasurer reconciled a payment, not that one was observed, so paying
+and being marked paid can be days apart. The member-facing copy says so.
 
 ## Local development
 
@@ -115,10 +111,38 @@ pinned to. And Vercel Hobby allows only one cron run per day, where a `*/15`
 schedule in `vercel.json` fails the build outright, so
 `.github/workflows/cron.yml` runs the real cadence instead.
 
+## Repository layout
+
+```
+src/
+  app/
+    (site)/        member pages: home, calendar, my trips, photos, pay, status
+    admin/         the board portal (_lib/ holds its request helpers and read models)
+    api/           the claim route, Auth.js, arm, photo uploads, cron, clock, warm-up
+    login/ welcome/
+  components/      shared UI; ui.tsx holds the primitives
+  lib/
+    auth/          board capabilities, the csc_member cookie, member accounts
+    claims/        the claim statement, the typed-phrase challenge, signup window
+    roster/        everything that moves a spot or waitlist position: promotion,
+                   roster editing and adds, release, reinstate, board seats, holds
+    money/         pay-page state, payment providers, dues
+    trips/ events/ trips, attendees, rides; club events and the calendar
+    photos/        the club photo pool, R2 storage, request-side viewer
+    email/         the sender and the only templates the app has
+    db/            Drizzle schema, pool, migrate, seed
+drizzle/           generated migrations - never edit by hand
+tests/             Vitest suites, run against Postgres through PgBouncer
+scripts/           board bootstrap, R2 check, wait-for-db
+docs/              deploy runbook, R2 CORS policy
+```
+
+The only email the app sends is the board's results push and the treasurer's
+unpaid-riders batch. Photos are one club-wide gallery per trip or event, under
+the Photos tab.
+
 ## Before changing anything
 
-[CLAUDE.md](CLAUDE.md) lists the invariants. It covers what the claim statement
-must not grow, the lock ordering every write follows, how board seats are shaped
-and why, and which columns are load-bearing. The comments in
-`src/lib/claims/claim.ts` and `src/lib/promotion.ts` are long because both are
-easy to simplify into a bug.
+[CLAUDE.md](CLAUDE.md) lists the invariants: what the claim statement must not
+grow, the lock ordering every write follows, how board seats are shaped, and
+which columns are load-bearing.

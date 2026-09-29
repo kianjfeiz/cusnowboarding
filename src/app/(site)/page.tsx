@@ -1,35 +1,26 @@
 import Link from "next/link";
-import type { CSSProperties } from "react";
 import { auth } from "@/auth";
-import { listUpcomingTrips } from "@/lib/trips";
-import { Badge, Card, formatDenver, formatMoney } from "@/components/ui";
+import { listUpcomingTrips } from "@/lib/trips/trips";
+import { Badge, Card, DAY_ONLY, SectionHeading, formatDenver, formatMoney } from "@/components/ui";
 import { CountdownChip } from "@/components/countdown-chip";
 import { UpcomingList } from "@/components/calendar/upcoming-list";
-import { toCalendarItemViews } from "@/components/calendar/view";
-import { listUpcomingCalendarItems } from "@/lib/events";
-import { listMemberTrips, type MemberTrip } from "@/lib/attendees";
+import { UPCOMING_WEEKS, toCalendarItemViews } from "@/components/calendar/view";
+import { listUpcomingCalendarItems } from "@/lib/events/events";
+import { listMemberTrips, type MemberTrip } from "@/lib/trips/attendees";
+import { standingOf, type Standing } from "@/lib/roster/standing";
 import { DrawnTitle } from "@/components/drawn-title";
+import { PaidLagNote, PayNowLink, STANDING_LABEL, dueLine } from "./signup-status";
 
 export const dynamic = "force-dynamic";
 
-/** Matches the calendar page, so "upcoming" means the same thing on both. */
-const UPCOMING_WEEKS = 6;
-
-/** Enough to be useful without turning the home page into the calendar. */
 const EVENT_LIMIT = 5;
 
-/** Rows past this point arrive together; only the top of a list is choreography. */
-const STAGGER_LIMIT = 8;
-
-const riseDelay = (index: number): CSSProperties =>
-  ({ "--rise-delay": `${Math.min(index, STAGGER_LIMIT) * 45}ms` }) as CSSProperties;
+/** A trip stays on Home through its departure day, then lives on My trips. */
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * A scheduled trip opens itself the moment its clock arrives, so "scheduled"
- * no longer means "not yet claimable" - the time does. Reading the status alone
- * would tell a member signups open at 8pm while the button beside it is already
- * live. `live` drives the pulse dot: the one looping animation on the site,
- * and it is information - this is the state a member sprints for.
+ * A scheduled trip opens itself when its clock arrives, so the time decides
+ * whether signups are open, not the status alone.
  */
 function signupState(trip: {
   status: string;
@@ -52,11 +43,13 @@ export default async function Home() {
   const session = await auth();
   const memberId = session?.user?.memberId;
 
-  const [upcoming, calendarItems, memberTrips] = await Promise.all([
+  const [allTrips, calendarItems, memberTrips] = await Promise.all([
     listUpcomingTrips(),
     listUpcomingCalendarItems({ weeks: UPCOMING_WEEKS }),
     memberId ? listMemberTrips(memberId) : Promise.resolve([] as MemberTrip[]),
   ]);
+
+  const upcoming = allTrips.filter((trip) => trip.departAt.getTime() > Date.now() - DAY_MS);
 
   // Trips already have their own section below; showing them again in the
   // calendar strip would list the same weekend twice.
@@ -64,41 +57,26 @@ export default async function Home() {
     .filter((item) => item.kind === "event")
     .slice(0, EVENT_LIMIT);
 
-  // Lapsed holds are left out on purpose. The spot is already gone, so asking
-  // for money on the home page would chase a member for something they can no
-  // longer buy; /me and the trip page are where that gets explained. Same
-  // no-grace reading of the deadline the member already sees on /me.
-  const due = memberTrips.filter(
-    (trip) =>
-      trip.status === "held" &&
-      trip.resultsReleased &&
-      !(
-        trip.paymentDeadlineAt !== null &&
-        new Date(trip.paymentDeadlineAt).getTime() < Date.now()
-      ),
+  // Where the member stands on each trip, so the list answers "am I going".
+  const standings = new Map<string, Standing>(
+    memberTrips.map((trip) => [trip.tripId, standingOf(trip)]),
   );
+
+  // Lapsed holds are left out: the spot is gone, so the bill would chase a
+  // member for something they can no longer buy. /me explains those.
+  const due = memberTrips.filter((trip) => standingOf(trip) === "due");
   const totalDue = due.reduce((sum, trip) => sum + trip.amountCents, 0);
 
-  /*
-    The hero is the one trip the club is collectively waiting on: the soonest
-    drop still ahead of everyone, or failing that a drop that is live right
-    now. Everything else queues in the lineup below, where the hero is not
-    repeated - a member should never wonder which of two cards for the same
-    weekend is the real one.
-  */
+  // The hero is the soonest drop still ahead, or one live right now. The
+  // lineup below never repeats it.
   const heroTrip =
     upcoming
       .filter((trip) => signupState(trip).live || trip.signupOpensAt.getTime() > Date.now())
       .sort((a, b) => a.signupOpensAt.getTime() - b.signupOpensAt.getTime())[0] ?? null;
   const lineup = upcoming.filter((trip) => trip.id !== heroTrip?.id);
   const heroState = heroTrip ? signupState(heroTrip) : null;
+  const heroStanding = heroTrip ? standings.get(heroTrip.id) : undefined;
 
-  /*
-    Tighter at the top than the other pages, because the title here is a drawing
-    rather than a line of type: it already carries its own weight. The subtitle
-    that used to sit under it only described the sections below, which say what
-    they are themselves.
-  */
   return (
     <main className="mx-auto max-w-2xl px-5 pb-12 pt-6">
       <header className="mb-6">
@@ -106,68 +84,40 @@ export default async function Home() {
       </header>
 
       {due.length > 0 ? (
-        /* The one thing on this page that is the member's to do, so it reads
-           like a bill, not a bulletin: the amount is the headline and every
-           line ends in the button that settles it. */
         <section className="mb-8 rounded-xl border border-accent/30 bg-accent-soft p-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
-            Waiting on you
+            Payment due
+            {due.length > 1 ? <span className="tnum"> · {formatMoney(totalDue)} total</span> : null}
           </p>
-          <p className="tnum mt-1 text-2xl font-semibold tracking-tight">
-            {formatMoney(totalDue)}
-            <span className="ml-2 text-sm font-normal text-ink-muted">
-              on {due.length} spot{due.length === 1 ? "" : "s"}
-            </span>
-          </p>
-          <ul className="mt-4 space-y-3">
+          <ul className="mt-3 space-y-3">
             {due.map((trip) => (
               <li
                 key={trip.tripId}
                 className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-ink">{trip.title}</p>
-                  <p className="text-xs text-ink-muted">
-                    <span className="tnum">{formatMoney(trip.amountCents)}</span> by{" "}
-                    {trip.paymentDeadlineAt
-                      ? formatDenver(trip.paymentDeadlineAt)
-                      : "the deadline"}
-                  </p>
+                  <p className="truncate font-medium text-ink">{trip.title}</p>
+                  <p className="tnum text-sm text-ink-muted">{dueLine(trip)}</p>
                 </div>
-                <Link
-                  href={`/pay/${trip.payToken}`}
-                  className="inline-flex h-9 shrink-0 items-center rounded-md bg-accent px-4 text-sm font-medium text-white transition-[background-color,transform] duration-150 hover:bg-accent-hover active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100"
-                >
-                  Pay now
-                </Link>
+                <PayNowLink payToken={trip.payToken} />
               </li>
             ))}
           </ul>
+          <PaidLagNote className="mt-4" />
         </section>
       ) : null}
 
       {heroTrip && heroState ? (
-        /*
-          The next drop, at billboard size. The countdown is the point: drops
-          are won by being there when the clock hits zero, so the clock is the
-          biggest thing on the page.
-        */
         <section className="mb-10">
           <Link
             href={`/trips/${heroTrip.slug}`}
-            className="group block rounded-2xl border border-border bg-surface p-6 transition-[border-color,transform,box-shadow] duration-200 [transition-timing-function:var(--ease-soft)] hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md motion-reduce:transition-none motion-reduce:hover:translate-y-0 sm:p-8"
+            className="group block rounded-2xl border border-border bg-surface p-6 transition-colors hover:border-border-strong sm:p-8"
           >
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
               {heroState.live ? (
                 <>
-                  <span aria-hidden="true" className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60 motion-reduce:animate-none" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
-                  </span>
-                  {/* The dot carries the whole message now, and it is
-                      decorative markup - so the state it stands for still has
-                      to be said somewhere a screen reader can reach. */}
-                  <span className="sr-only">Signups are open</span>
+                  <LiveDot />
+                  Signups open
                 </>
               ) : (
                 "Next drop"
@@ -178,107 +128,84 @@ export default async function Home() {
               {heroTrip.title}
             </h2>
             <p className="mt-2 text-sm text-ink-muted">
-              {formatDenver(heroTrip.departAt, {
-                hour: undefined,
-                minute: undefined,
-                timeZoneName: undefined,
-              })}
+              {formatDenver(heroTrip.departAt, DAY_ONLY)}
               {heroTrip.resort ? ` · ${heroTrip.resort}` : ""} ·{" "}
               {formatMoney(heroTrip.priceCents)} · {heroTrip.capacity} spots
             </p>
 
-            {/* Live, the button is the only thing in this row, so it sits at
-                the start rather than being pushed across a gap to nothing. */}
             <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
               {heroState.live ? null : (
-                <p className="tnum text-4xl font-semibold tracking-tight sm:text-5xl">
-                  <CountdownChip
-                    targetMs={heroTrip.signupOpensAt.getTime()}
-                    doneLabel="Open now"
-                  />
-                </p>
+                <div>
+                  <p className="tnum text-4xl font-semibold tracking-tight sm:text-5xl">
+                    <CountdownChip
+                      targetMs={heroTrip.signupOpensAt.getTime()}
+                      doneLabel="Open now"
+                    />
+                  </p>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    Opens {formatDenver(heroTrip.signupOpensAt)}
+                  </p>
+                </div>
               )}
-              <span className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white transition-colors group-hover:bg-accent-hover">
-                {heroState.live ? "Sign up" : "Get ready"}
-                <span
-                  aria-hidden="true"
-                  className="transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transition-none"
-                >
-                  &rarr;
+              {heroStanding ? (
+                <Badge emphasis="strong">{STANDING_LABEL[heroStanding]}</Badge>
+              ) : (
+                <span className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white transition-colors group-hover:bg-accent-hover">
+                  {heroState.live ? "Sign up" : "Get ready"}
+                  <span aria-hidden="true">&rarr;</span>
                 </span>
-              </span>
+              )}
             </div>
-            {!heroState.live ? (
-              <p className="mt-2 text-xs text-ink-faint">
-                Opens {formatDenver(heroTrip.signupOpensAt)}
-              </p>
-            ) : null}
           </Link>
         </section>
       ) : null}
 
       <section>
-        <h2 className="mb-3 flex items-baseline gap-2 text-sm font-semibold uppercase tracking-wide text-ink-faint">
-          {heroTrip ? "More trips" : "Trips"}
-          {lineup.length > 0 ? <span className="tnum font-normal">{lineup.length}</span> : null}
-        </h2>
+        <SectionHeading className="mb-3">{heroTrip ? "More trips" : "Trips"}</SectionHeading>
 
-        {upcoming.length === 0 ? (
-          <Card>
-            <p className="text-sm text-ink-muted">No trips posted yet.</p>
-          </Card>
-        ) : lineup.length === 0 ? (
+        {lineup.length === 0 ? (
           <Card>
             <p className="text-sm text-ink-muted">
-              Nothing else scheduled yet. The one above is the show.
+              {upcoming.length === 0 ? "No trips posted yet." : "Nothing else scheduled yet."}
             </p>
           </Card>
         ) : (
           <ul className="space-y-3">
-            {lineup.map((trip, index) => {
+            {lineup.map((trip) => {
               const signup = signupState(trip);
+              const standing = standings.get(trip.id);
               return (
-                <li key={trip.id} className="rise" style={riseDelay(index)}>
+                <li key={trip.id}>
                   <Link
                     href={`/trips/${trip.slug}`}
-                    className="group flex items-center gap-4 rounded-lg border border-border bg-paper p-5 transition-[border-color,transform,box-shadow] duration-200 [transition-timing-function:var(--ease-soft)] hover:-translate-y-0.5 hover:border-border-strong hover:shadow-sm motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+                    className="group flex items-center gap-4 rounded-lg border border-border bg-paper p-5 transition-colors hover:border-border-strong"
                   >
-                    {/* Lineup numerals: the season reads as a set. */}
-                    <span
-                      aria-hidden="true"
-                      className="tnum w-7 shrink-0 text-sm font-medium text-ink-faint"
-                    >
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
                     <div className="min-w-0 flex-1">
                       <p className="font-medium text-ink">{trip.title}</p>
                       <p className="mt-0.5 text-sm text-ink-muted">
-                        {formatDenver(trip.departAt, {
-                          hour: undefined,
-                          minute: undefined,
-                          timeZoneName: undefined,
-                        })}
-                        {trip.resort ? ` · ${trip.resort}` : ""}
+                        {formatDenver(trip.departAt, DAY_ONLY)}
+                        {trip.resort ? ` · ${trip.resort}` : ""} · {formatMoney(trip.priceCents)}
                       </p>
-                      <p className="mt-2 flex items-center gap-2 text-sm">
-                        {signup.live ? (
-                          <span aria-hidden="true" className="relative flex h-2 w-2">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60 motion-reduce:animate-none" />
-                            <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+                      {standing ? null : (
+                        <p className="mt-2 flex items-center gap-2 text-sm">
+                          {signup.live ? <LiveDot /> : null}
+                          <span
+                            className={signup.live ? "font-medium text-ink" : "text-ink-muted"}
+                          >
+                            {signup.label}
                           </span>
-                        ) : null}
-                        <span className={signup.live ? "font-medium text-ink" : "text-ink-muted"}>
-                          {signup.label}
-                        </span>
-                      </p>
+                        </p>
+                      )}
                     </div>
-                    <div className="flex shrink-0 flex-col items-end gap-2">
-                      <Badge emphasis="strong">{formatMoney(trip.priceCents)}</Badge>
-                      <span className="text-xs text-ink-faint">{trip.capacity} spots</span>
-                    </div>
+                    {/* The member's own standing, in the words My trips uses. */}
+                    {standing ? (
+                      <Badge emphasis={standing === "due" ? "strong" : "normal"}>
+                        {STANDING_LABEL[standing]}
+                      </Badge>
+                    ) : null}
                     <span
                       aria-hidden="true"
-                      className="-translate-x-1 text-ink-faint opacity-0 transition-[transform,opacity] duration-200 group-hover:translate-x-0 group-hover:opacity-100 motion-reduce:transition-none"
+                      className="text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"
                     >
                       &rarr;
                     </span>
@@ -292,9 +219,7 @@ export default async function Home() {
 
       <section className="mt-10">
         <div className="mb-3 flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-faint">
-            Upcoming events
-          </h2>
+          <SectionHeading>Upcoming events</SectionHeading>
           <Link
             href="/calendar"
             className="-my-2 py-2 text-sm text-ink-muted underline underline-offset-4 hover:text-ink"
@@ -305,5 +230,15 @@ export default async function Home() {
         <UpcomingList items={events} />
       </section>
     </main>
+  );
+}
+
+/** The signup pulse: the one looping animation on the site, and it is state. */
+function LiveDot() {
+  return (
+    <span aria-hidden="true" className="relative flex h-2 w-2">
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60 motion-reduce:animate-none" />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+    </span>
   );
 }

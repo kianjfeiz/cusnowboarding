@@ -144,8 +144,8 @@ export const members = pgTable(
 
     /**
      * Google's stable subject id. Kept alongside email rather than instead of
-     * it, because a member may sign in with Google on one device and verify by
-     * emailed code on another, and both must resolve to the same person.
+     * it: the subject survives an address change, and the email is what
+     * matches a row that existed before its owner first signed in with Google.
      */
     googleSub: text("google_sub").unique(),
     imageUrl: text("image_url"),
@@ -178,7 +178,7 @@ export const members = pgTable(
  * flag cleared and the history intact.
  *
  * Board members do not pay dues. Their season is a `waived` row with amount
- * zero, written by `waiveBoardDues` in src/lib/dues.ts - a real row, because
+ * zero, written by `waiveBoardDues` in src/lib/money/dues.ts - a real row, because
  * the returning-rate history must not develop holes for the years someone
  * served on the board.
  */
@@ -216,12 +216,18 @@ export const memberDues = pgTable(
   ],
 );
 
+/**
+ * UNUSED. Held codes for the emailed-code sign-in, which was removed when
+ * Google became the only way in - nothing reads or writes this table now. It
+ * is left defined rather than dropped so that no migration destroys existing
+ * rows as a side effect; dropping it should be its own deliberate change.
+ */
 export const emailVerifications = pgTable(
   "email_verifications",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     email: citext("email").notNull(),
-    /** sha256(code + VERIFY_PEPPER). The plaintext code is never stored. */
+    /** sha256(code + pepper). The plaintext code was never stored. */
     codeHash: text("code_hash").notNull(),
     expiresAt: timestamptz("expires_at").notNull(),
     consumedAt: timestamptz("consumed_at"),
@@ -298,8 +304,8 @@ export const trips = pgTable(
      * Releasing RESETS the payment deadline on every held signup, because the
      * window has to start when the member can actually act on it. Without that,
      * a board that released two days late would reap spots from people who were
-     * never told they had one. The expiry and reminder jobs both skip trips
-     * where this is null for the same reason.
+     * never told they had one. The expiry job skips trips where this is null
+     * for the same reason.
      */
     resultsReleasedAt: timestamptz("results_released_at"),
     resultsReleasedBy: uuid("results_released_by").references(() => boardUsers.id),
@@ -615,26 +621,27 @@ export const events = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// Trip photos
+// Photos (trips and events)
 // ---------------------------------------------------------------------------
 
 /**
- * Photos are visible only to members who were actually on the trip (plus the
- * board). These are identifiable pictures of students taken on a club trip, so
- * the default is the narrow audience rather than the club-wide one; widening it
- * later is a one-line policy change, un-sharing something is not.
- *
- * Only the storage key lives here. Bytes go to object storage, and the app
- * hands out short-lived signed URLs rather than making a bucket public - a
- * public bucket URL is forever and cannot be scoped to the trip roster.
+ * The club's shared photo pool: any signed-in member can view and upload for
+ * any trip or event. That audience is the whole membership by the board's
+ * explicit decision - the whole site already sits behind CU Google sign-in -
+ * but it is still not the public internet, which is why bytes go to object
+ * storage and the app hands out short-lived signed URLs rather than making a
+ * bucket public. A public bucket URL is forever.
  */
 export const tripPhotos = pgTable(
   "trip_photos",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    tripId: uuid("trip_id")
-      .notNull()
-      .references(() => trips.id, { onDelete: "cascade" }),
+    /**
+     * Exactly one of trip_id / event_id is set - a photo belongs to one
+     * outing. The table keeps its historical name; it holds event photos too.
+     */
+    tripId: uuid("trip_id").references(() => trips.id, { onDelete: "cascade" }),
+    eventId: uuid("event_id").references(() => events.id, { onDelete: "cascade" }),
     uploaderMemberId: uuid("uploader_member_id")
       .notNull()
       .references(() => members.id),
@@ -663,12 +670,46 @@ export const tripPhotos = pgTable(
   },
   (t) => [
     index("trip_photos_trip_idx").on(t.tripId, t.createdAt.desc()),
+    index("trip_photos_event_idx").on(t.eventId, t.createdAt.desc()),
     index("trip_photos_uploader_idx").on(t.uploaderMemberId, t.createdAt.desc()),
     index("trip_photos_visible_idx")
       .on(t.tripId, t.takenAt.desc())
       .where(sql`status = 'ready'`),
     check("trip_photos_size_positive", sql`${t.sizeBytes} > 0`),
+    check("trip_photos_one_subject", sql`num_nonnulls(${t.tripId}, ${t.eventId}) = 1`),
   ],
+);
+
+// ---------------------------------------------------------------------------
+// Sponsors and their discount codes
+// ---------------------------------------------------------------------------
+
+export const sponsors = pgTable("sponsors", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  websiteUrl: text("website_url"),
+  description: text("description"),
+  createdBy: uuid("created_by").references(() => boardUsers.id, { onDelete: "set null" }),
+  createdAt: timestamptz("created_at").notNull().defaultNow(),
+  updatedAt: timestamptz("updated_at")
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+export const sponsorCodes = pgTable(
+  "sponsor_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sponsorId: uuid("sponsor_id")
+      .notNull()
+      .references(() => sponsors.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    /** What the code gets you, e.g. "20% off online orders". */
+    details: text("details"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("sponsor_codes_sponsor_idx").on(t.sponsorId, t.createdAt)],
 );
 
 // ---------------------------------------------------------------------------
@@ -801,6 +842,7 @@ export const membersRelations = relations(members, ({ many }) => ({
 
 export const tripPhotosRelations = relations(tripPhotos, ({ one }) => ({
   trip: one(trips, { fields: [tripPhotos.tripId], references: [trips.id] }),
+  event: one(events, { fields: [tripPhotos.eventId], references: [events.id] }),
   uploader: one(members, {
     fields: [tripPhotos.uploaderMemberId],
     references: [members.id],

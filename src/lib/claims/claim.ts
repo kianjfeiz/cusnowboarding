@@ -12,17 +12,7 @@ export interface Queryable {
   ): Promise<{ rows: T[] }>;
 }
 
-export type ClaimOutcome =
-  | "held"
-  | "waitlisted"
-  | "duplicate"
-  | "not_open"
-  | "unverified"
-  | "not_member"
-  | "full"
-  | "error";
-
-export interface ClaimedSignup {
+interface ClaimedSignup {
   id: string;
   claimSeq: number;
   status: SignupStatus;

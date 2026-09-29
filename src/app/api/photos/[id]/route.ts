@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { removePhoto } from "@/lib/photos";
-import { resolvePhotoViewer } from "../_viewer";
+import { removePhoto } from "@/lib/photos/photos";
+import { resolvePhotoViewer } from "@/lib/photos/viewer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

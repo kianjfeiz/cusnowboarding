@@ -6,8 +6,8 @@ import {
   releaseLapsedHolds,
   renumberWaitlist,
   withTripLock,
-} from "@/lib/promotion";
-import { getOccupancy } from "@/lib/trips";
+} from "@/lib/roster/promotion";
+import { getOccupancy } from "@/lib/trips/trips";
 import {
   createTestTrip,
   deleteTestTrips,

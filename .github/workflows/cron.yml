@@ -1,19 +1,19 @@
 name: Scheduled jobs
 
 # Vercel's Hobby plan allows one cron run per day, which is not enough for the
-# hold reaper or the reminder batches - vercel.json keeps a daily run as a
-# floor, and this workflow provides the real cadence.
+# hold reaper - vercel.json keeps a daily run as a floor, and this workflow
+# provides the real cadence.
 #
 # Every 30 minutes rather than every 15: a private repo gets 2000 free Actions
 # minutes a month, jobs are billed rounded up to the minute, and every 15
-# minutes would be ~2880. All three endpoints run in ONE job for the same
-# reason - three jobs would triple the bill for three curls.
+# minutes would be ~2880.
 #
 # Nothing here is load-bearing for correctness. Holds past their deadline are
 # treated as expired on read, so a missed run shows the right numbers; what the
-# run actually buys is freeing the spot number for promotion, and the emails.
+# run actually buys is freeing the spot number for promotion. It sends no
+# email - see "Email policy" in CLAUDE.md.
 #
-# On Pro, delete this file and put vercel.json back to */15 and hourly.
+# On Pro, delete this file and put vercel.json back to */15.
 
 on:
   schedule:
@@ -25,7 +25,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger scheduled endpoints
+      - name: Release lapsed holds
         env:
           BASE_URL: ${{ secrets.CRON_BASE_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -35,13 +35,10 @@ jobs:
             echo "CRON_BASE_URL and CRON_SECRET must be set as repository secrets"
             exit 1
           fi
-          for job in expire-holds payment-reminders drop-reminders; do
-            echo "--- $job"
-            # --fail-with-body so a 401 or 500 fails the run loudly and still
-            # prints what the endpoint said. A silent scheduled job that has
-            # been 401ing for a month is the failure worth designing against.
-            curl --fail-with-body --silent --show-error --max-time 60 \
-              -X POST "$BASE_URL/api/cron/$job" \
-              -H "Authorization: Bearer $CRON_SECRET"
-            echo
-          done
+          # --fail-with-body so a 401 or 500 fails the run loudly and still
+          # prints what the endpoint said. A silent scheduled job that has
+          # been 401ing for a month is the failure worth designing against.
+          curl --fail-with-body --silent --show-error --max-time 60 \
+            -X POST "$BASE_URL/api/cron/expire-holds" \
+            -H "Authorization: Bearer $CRON_SECRET"
+          echo

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { claimSpot, generatePayToken } from "@/lib/claims/claim";
 import { pool } from "@/lib/db";
-import { reinstateSignup } from "@/lib/reinstate";
+import { reinstateSignup } from "@/lib/roster/reinstate";
 import {
   createTestTrip,
   deleteTestTrips,
@@ -126,7 +126,7 @@ describe("reinstating a released signup", () => {
     expect(audit[0].data.spotNumber).toBe(1);
   });
 
-  test("refuses when the trip is full", async () => {
+  test("brings them back past capacity when the trip is full", async () => {
     const tripId = await createTestTrip({ capacity: 2, waitlistCap: null });
     const rows = await fill(tripId, 3);
     await release(rows[0].id);
@@ -140,13 +140,11 @@ describe("reinstating a released signup", () => {
       [rows[2].id],
     );
 
+    // Capacity is a target: the board may run the trip over it.
     const result = await reinstateSignup(rows[0].id, null);
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toBe("no_free_spot");
-
-    // Refusing means refusing: nothing was written.
-    expect((await statusOf(rows[0].id)).status).toBe("expired");
+    expect(result.ok).toBe(true);
+    const back = (await getSignups(tripId)).find((row) => row.id === rows[0].id)!;
+    expect(back.spot_number).toBe(3);
   });
 
   test("refuses a signup that is still held", async () => {
@@ -280,7 +278,7 @@ describe("reinstating a released signup", () => {
     expect((await statusOf(rows[1].id)).status).toBe("expired");
   });
 
-  test("concurrent reinstates cannot both take the same spot", async () => {
+  test("concurrent reinstates never share a spot", async () => {
     const tripId = await createTestTrip({ capacity: 2, waitlistCap: null });
     const rows = await fill(tripId, 2);
     await release(rows[0].id);
@@ -299,12 +297,13 @@ describe("reinstating a released signup", () => {
       reinstateSignup(rows[1].id, null),
     ]);
 
-    expect(results.filter((r) => r.ok).length).toBe(1);
-    expect(results.filter((r) => !r.ok && r.reason === "no_free_spot").length).toBe(1);
+    // Both come back - one into the free spot, one past capacity - and the trip
+    // lock keeps them from being handed the same number.
+    expect(results.filter((r) => r.ok).length).toBe(2);
 
     const after = await getSignups(tripId);
     const spots = after.filter((r) => r.spot_number !== null).map((r) => r.spot_number!);
     expect(new Set(spots).size).toBe(spots.length);
-    expect(spots.length).toBe(2);
+    expect(spots.length).toBe(3);
   });
 });

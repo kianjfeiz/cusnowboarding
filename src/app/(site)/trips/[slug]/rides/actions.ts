@@ -2,30 +2,25 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getMemberSession } from "@/lib/member-session";
-import { loadVerifiedMember } from "@/lib/verification";
-import { getTripBySlug } from "@/lib/trips";
-import { canUseRideSheet, cancelRide, claimSeat, offerRide, releaseSeat } from "@/lib/rides";
+import { currentMember } from "@/lib/auth/current-member";
+import { getTripBySlug } from "@/lib/trips/trips";
+import { canUseRideSheet, cancelRide, claimSeat, offerRide, releaseSeat } from "@/lib/trips/rides";
 
 /**
- * Every action re-resolves identity and re-checks the sheet gate itself. The
- * page checked already, but a form can be submitted long after the page
- * rendered - after a hold lapsed, after the member was moved to the waitlist -
- * and the sheet's audience rule has to hold at write time, not render time.
+ * Every action re-checks the sheet gate itself: a form can be submitted long
+ * after the page rendered, and the audience rule has to hold at write time.
  */
-async function requireRider(slug: string) {
+async function requireRider(formData: FormData) {
+  const slug = String(formData.get("slug") ?? "");
   const trip = await getTripBySlug(slug);
   if (!trip) redirect("/me");
 
-  const session = await getMemberSession();
-  const member = session
-    ? await loadVerifiedMember(session.memberId, session.tokenVersion)
-    : null;
+  const member = await currentMember();
   if (!member || !(await canUseRideSheet(trip.id, member.id))) {
     redirect(`/trips/${slug}/rides`);
   }
 
-  return { trip, member };
+  return { slug, trip, member };
 }
 
 function back(slug: string, error?: string): never {
@@ -34,8 +29,7 @@ function back(slug: string, error?: string): never {
 }
 
 export async function offerRideAction(formData: FormData): Promise<void> {
-  const slug = String(formData.get("slug") ?? "");
-  const { trip, member } = await requireRider(slug);
+  const { slug, trip, member } = await requireRider(formData);
 
   const result = await offerRide(trip.id, member.id, {
     seatCapacity: Number(formData.get("seats") ?? 0),
@@ -48,24 +42,21 @@ export async function offerRideAction(formData: FormData): Promise<void> {
 }
 
 export async function claimSeatAction(formData: FormData): Promise<void> {
-  const slug = String(formData.get("slug") ?? "");
+  const { slug, trip, member } = await requireRider(formData);
   const rideId = String(formData.get("rideId") ?? "");
-  const { trip, member } = await requireRider(slug);
 
   const result = await claimSeat(rideId, trip.id, member.id, String(formData.get("phone") ?? ""));
   back(slug, result.ok ? undefined : result.reason);
 }
 
 export async function releaseSeatAction(formData: FormData): Promise<void> {
-  const slug = String(formData.get("slug") ?? "");
-  const { trip, member } = await requireRider(slug);
+  const { slug, trip, member } = await requireRider(formData);
   await releaseSeat(trip.id, member.id);
   back(slug);
 }
 
 export async function cancelRideAction(formData: FormData): Promise<void> {
-  const slug = String(formData.get("slug") ?? "");
-  const { trip, member } = await requireRider(slug);
+  const { slug, trip, member } = await requireRider(formData);
   await cancelRide(trip.id, member.id);
   back(slug);
 }

@@ -4,18 +4,10 @@ import { Client } from "pg";
 config({ path: [".env.local", ".env"], quiet: true });
 
 /**
- * Creates the first board member so a fresh deployment can be signed into.
+ * Creates the first board member so a fresh deployment can be signed into:
+ * /admin is gated on `board_users`, and the UI for adding one is inside /admin.
+ * It inserts the role catalogue and one superadmin and touches nothing else.
  *
- * /admin is gated on `board_users`, and the only way to add someone to that
- * table through the UI is from inside /admin - so a brand new database has
- * nobody who can let anybody in. This breaks that loop, and is the only thing
- * that should ever write to a production database from a laptop.
- *
- * Deliberately narrow: it inserts the role catalogue and one superadmin, and
- * touches nothing else. Seeding demo data into production is what
- * `db:seed` is prevented from doing, and this is not a way around that.
- *
- * Usage:
  *   npm run board:bootstrap -- president@colorado.edu "Your Name"
  *
  * Idempotent - running it twice reports the existing row rather than failing.
@@ -39,11 +31,6 @@ async function main() {
     throw new Error('usage: npm run board:bootstrap -- president@colorado.edu "Your Name"');
   }
 
-  /*
-    Sign-in rejects any non-CU address, so a personal address here would create
-    a board row that can never actually reach the admin - a confusing failure
-    to debug later. Refuse it at the point of entry instead.
-  */
   const domain = email.split("@")[1] ?? "";
   if (!(domain === "colorado.edu" || domain.endsWith(".colorado.edu"))) {
     throw new Error(
@@ -51,8 +38,6 @@ async function main() {
     );
   }
 
-  // Migrations run against the direct connection, and so does this: it is a
-  // one-off admin write, not app traffic.
   const url = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
   if (!url) throw new Error("DIRECT_DATABASE_URL or DATABASE_URL must be set");
 

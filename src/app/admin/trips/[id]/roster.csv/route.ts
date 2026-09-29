@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { currentActor, isDemoActor } from "../../../_lib/actor";
-import { can } from "@/lib/authz";
+import { currentActor } from "../../../_lib/actor";
+import { csvDollars, csvResponse, csvTime as at } from "../../../_lib/csv";
+import { can } from "@/lib/auth/authz";
 import {
   STATUS_LABELS,
   effectiveStatus,
@@ -14,26 +15,6 @@ export const dynamic = "force-dynamic";
  * The roster as a file, because the resort wants a manifest and the bus driver
  * wants a headcount, and neither of them is going to log in.
  */
-function csvCell(value: unknown): string {
-  const text = value === null || value === undefined ? "" : String(value);
-  // Excel and Sheets both treat a leading =, +, - or @ as a formula.
-  const guarded = /^[=+\-@]/.test(text) ? `'${text}` : text;
-  return `"${guarded.replace(/"/g, '""')}"`;
-}
-
-const DENVER: Intl.DateTimeFormatOptions = {
-  timeZone: "America/Denver",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-};
-
-const at = (value: Date | null) =>
-  value ? new Date(value).toLocaleString("en-US", DENVER) : "";
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -41,13 +22,6 @@ export async function GET(
   const actor = await currentActor();
   if (!can(actor, "viewRosters")) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-
-  // Shut for the same reason as /admin/members: this export puts every rider's
-  // name against their email and phone number. Withholding the page while
-  // leaving its CSV open would withhold nothing.
-  if (isDemoActor(actor)) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
   const { id } = await params;
@@ -64,9 +38,8 @@ export async function GET(
     "email",
     "phone",
     "dues_paid",
-    // The manifest is a headcount for a bus driver as much as a ledger, so a
-    // comped board rider has to be visible as a body without reading as a
-    // member who paid nothing.
+    // A comped board rider has to count as a body on the bus without reading
+    // as a member who paid nothing.
     "board_seat",
     "amount_usd",
     "paid_at",
@@ -76,39 +49,23 @@ export async function GET(
     "claimed_at",
   ];
 
-  const lines = [header.map(csvCell).join(",")];
+  const rows = roster.map((row) => [
+    row.spot_number,
+    row.claim_seq,
+    STATUS_LABELS[effectiveStatus(row, now)],
+    row.first_name,
+    row.last_name,
+    row.email,
+    row.phone,
+    row.is_club_member ? "yes" : "no",
+    row.board_seat ? "yes" : "no",
+    csvDollars(row.amount_cents),
+    at(row.paid_at),
+    at(row.payment_deadline_at),
+    row.paid_offline ? "yes" : "no",
+    row.waitlist_position,
+    at(row.claimed_at),
+  ]);
 
-  for (const row of roster) {
-    lines.push(
-      [
-        row.spot_number ?? "",
-        row.claim_seq,
-        STATUS_LABELS[effectiveStatus(row, now)],
-        row.first_name,
-        row.last_name,
-        row.email,
-        row.phone ?? "",
-        row.is_club_member ? "yes" : "no",
-        row.board_seat ? "yes" : "no",
-        (row.amount_cents / 100).toFixed(2),
-        at(row.paid_at),
-        at(row.payment_deadline_at),
-        row.paid_offline ? "yes" : "no",
-        row.waitlist_position ?? "",
-        at(row.claimed_at),
-      ]
-        .map(csvCell)
-        .join(","),
-    );
-  }
-
-  const filename = `${trip.slug}-roster.csv`;
-
-  return new NextResponse(lines.join("\r\n"), {
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "Cache-Control": "no-store",
-    },
-  });
+  return csvResponse(`${trip.slug}-roster.csv`, header, rows);
 }

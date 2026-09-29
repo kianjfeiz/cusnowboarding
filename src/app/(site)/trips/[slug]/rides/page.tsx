@@ -1,13 +1,10 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import type { CSSProperties } from "react";
 import { SubmitButton } from "@/components/admin/submit-button";
-import { Badge, Card, Field, Input, Notice, cn } from "@/components/ui";
-import { getMemberSession } from "@/lib/member-session";
-import { canUseRideSheet, getRideSheet, type RideView } from "@/lib/rides";
-import { getTripBySlug } from "@/lib/trips";
-import { loadVerifiedMember } from "@/lib/verification";
+import { Badge, Card, Detail, Field, Input, Notice, PageHeader, cn } from "@/components/ui";
+import { currentMember } from "@/lib/auth/current-member";
+import { canUseRideSheet, getRideSheet, type RideSheet, type RideView } from "@/lib/trips/rides";
+import { getTripBySlug } from "@/lib/trips/trips";
 import {
   cancelRideAction,
   claimSeatAction,
@@ -40,13 +37,9 @@ const ERRORS: Record<string, string> = {
   invalid: "Check the phone number and the leaving time - both are needed.",
 };
 
-const riseDelay = (index: number): CSSProperties =>
-  ({ "--rise-delay": `${Math.min(index, 8) * 45}ms` }) as CSSProperties;
-
 /**
- * The ride sheet. Same audience as the roster page - roster finalized, viewer
- * actually going - because its whole job is handing out the names and phone
- * numbers of the people in the cars.
+ * The ride sheet hands out names and phone numbers, so it has the roster
+ * page's audience: roster finalized, and the viewer paid on the trip.
  */
 export default async function TripRidesPage({
   params,
@@ -59,107 +52,55 @@ export default async function TripRidesPage({
   const trip = await getTripBySlug(slug);
   if (!trip || trip.status === "draft") notFound();
 
-  const session = await getMemberSession();
-  const member = session
-    ? await loadVerifiedMember(session.memberId, session.tokenVersion)
-    : null;
-
-  const entitled = member ? await canUseRideSheet(trip.id, member.id) : false;
+  const member = await currentMember();
+  const sheet =
+    member && (await canUseRideSheet(trip.id, member.id))
+      ? await getRideSheet(trip.id, member.id)
+      : null;
   const { error } = await searchParams;
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-12">
-      <header className="mb-8">
-        <Link
-          href="/me"
-          className="-my-2 inline-flex items-center gap-1.5 py-2 text-sm text-ink-muted transition-colors hover:text-ink"
-        >
-          <span aria-hidden="true">&larr;</span> My trips
-        </Link>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight">Rides</h1>
+      <PageHeader back="/me" backLabel="My trips" title="Rides">
         <p className="mt-2 text-sm text-ink-muted">{trip.title}</p>
-      </header>
+      </PageHeader>
 
-      {!entitled || !member ? (
-        <Notice title="The ride sheet opens once you are paid up">
-          {member
-            ? "Rides are organised between the people who are on this trip, so this opens once results are out and your payment is recorded. Being marked paid lags actually paying by a day or two."
-            : "Sign in with the address you used to sign up, and make sure you are on this trip."}
-        </Notice>
+      {!sheet || !member ? (
+        trip.rosterFinalizedAt === null ? (
+          <Notice title="Rides open after the roster is released" />
+        ) : (
+          <Notice title="Rides open once you are marked paid">
+            Being marked paid can lag paying by a day.
+          </Notice>
+        )
       ) : (
-        <RideSheetView
-          tripId={trip.id}
-          slug={slug}
-          memberId={member.id}
-          error={error}
-        />
+        <div className="space-y-6">
+          {error && ERRORS[error] ? <Notice tone="alert">{ERRORS[error]}</Notice> : null}
+
+          {/* Above the list: a driver should not scroll past every car to offer one.
+              Anyone already in a car sees why the form is gone on that car's card. */}
+          {sheet.viewer.drivingRideId === null && sheet.viewer.seatRideId === null ? (
+            <OfferForm slug={slug} />
+          ) : null}
+
+          {sheet.rides.length === 0 ? (
+            <Notice title="No cars yet" />
+          ) : (
+            <ul className="space-y-4">
+              {sheet.rides.map((ride) => (
+                <li key={ride.id}>
+                  <RideCard ride={ride} slug={slug} memberId={member.id} viewer={sheet.viewer} />
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <p className="text-xs text-ink-faint">
+            Phone numbers here are shared only with riders on this trip.
+          </p>
+        </div>
       )}
     </main>
-  );
-}
-
-async function RideSheetView({
-  tripId,
-  slug,
-  memberId,
-  error,
-}: {
-  tripId: string;
-  slug: string;
-  memberId: string;
-  error?: string;
-}) {
-  const sheet = await getRideSheet(tripId, memberId);
-  const { drivingRideId, seatRideId } = sheet.viewer;
-  const hasRide = drivingRideId !== null || seatRideId !== null;
-
-  return (
-    <div className="space-y-6">
-      {error && ERRORS[error] ? (
-        <Notice tone="alert">{ERRORS[error]}</Notice>
-      ) : null}
-
-      {/* Drivers first: someone offering a car should not have to scroll past
-          every existing one to find the form. Riders scan the list right below
-          it either way. */}
-      {!hasRide ? (
-        <OfferForm slug={slug} />
-      ) : (
-        <p className="text-xs text-ink-faint">
-          {drivingRideId
-            ? "You are on the sheet as a driver. Cancel your ride if plans changed."
-            : "You have a seat. Leave it first if you want to drive or switch cars."}
-        </p>
-      )}
-
-      {sheet.rides.length === 0 ? (
-        <Notice title="No cars yet">
-          Nobody has offered a car for this trip. If you are driving, yours goes
-          first.
-        </Notice>
-      ) : (
-        <ul className="space-y-4">
-          {sheet.rides.map((ride, index) => (
-            <li key={ride.id} className="rise" style={riseDelay(index)}>
-              <RideCard
-                ride={ride}
-                slug={slug}
-                memberId={memberId}
-                viewerHasRide={hasRide}
-                isViewerSeat={ride.id === seatRideId}
-                isViewerRide={ride.id === drivingRideId}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <p className="text-xs text-ink-faint">
-        Phone numbers here are shared only with the people on this trip, so you
-        can actually find each other in a parking lot at 6am. The club does not
-        organise the driving.
-      </p>
-    </div>
   );
 }
 
@@ -167,18 +108,17 @@ function RideCard({
   ride,
   slug,
   memberId,
-  viewerHasRide,
-  isViewerSeat,
-  isViewerRide,
+  viewer,
 }: {
   ride: RideView;
   slug: string;
   memberId: string;
-  viewerHasRide: boolean;
-  isViewerSeat: boolean;
-  isViewerRide: boolean;
+  viewer: RideSheet["viewer"];
 }) {
   const free = ride.seatCapacity - ride.riders.length;
+  const isViewerRide = ride.id === viewer.drivingRideId;
+  const isViewerSeat = ride.id === viewer.seatRideId;
+  const viewerHasRide = viewer.drivingRideId !== null || viewer.seatRideId !== null;
 
   return (
     <Card className={cn("p-5", (isViewerSeat || isViewerRide) && "border-accent/40")}>
@@ -195,17 +135,11 @@ function RideCard({
         </Badge>
       </div>
 
-      <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-        <div>
-          <dt className="text-xs uppercase tracking-wide text-ink-faint">Leaving</dt>
-          <dd className="mt-0.5 text-sm text-ink">{ride.departsNote}</dd>
-        </div>
-        <div>
-          <dt className="text-xs uppercase tracking-wide text-ink-faint">Coming back</dt>
-          <dd className="mt-0.5 text-sm text-ink">
-            {ride.returnsNote ?? <span className="text-ink-faint">Ask the driver</span>}
-          </dd>
-        </div>
+      <dl className="mt-4 grid grid-cols-2 gap-3">
+        <Detail label="Leaving">{ride.departsNote}</Detail>
+        <Detail label="Coming back">
+          {ride.returnsNote ?? <span className="text-ink-faint">Ask the driver</span>}
+        </Detail>
       </dl>
 
       {ride.riders.length > 0 ? (
@@ -254,20 +188,11 @@ function RideCard({
             </SubmitButton>
           </form>
         ) : viewerHasRide || free === 0 ? null : (
-          /*
-            The claim, spreadsheet-style: name is already known, so the only
-            thing to type is the number the driver will actually call.
-          */
-          <form
-            action={claimSeatAction}
-            className="flex flex-wrap items-end gap-2"
-          >
+          <form action={claimSeatAction} className="flex flex-wrap items-end gap-2">
             <input type="hidden" name="slug" value={slug} />
             <input type="hidden" name="rideId" value={ride.id} />
             <label className="min-w-0 flex-1">
-              <span className="mb-1.5 block text-xs font-medium text-ink">
-                Your phone number
-              </span>
+              <span className="mb-1.5 block text-xs font-medium text-ink">Your phone number</span>
               <Input
                 name="phone"
                 type="tel"
@@ -293,10 +218,10 @@ function OfferForm({ slug }: { slug: string }) {
         <input type="hidden" name="slug" value={slug} />
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Leaving" hint="Time and meeting spot, like the sheet always had.">
+          <Field label="Leaving" hint="Time and meeting spot.">
             <Input name="departs" required maxLength={120} placeholder="Fri 6:00 AM, Regent lot" />
           </Field>
-          <Field label="Coming back" hint="Leave it blank if you have not decided.">
+          <Field label="Coming back" hint="Optional.">
             <Input name="returns" maxLength={120} placeholder="Sun after lunch" />
           </Field>
         </div>
@@ -316,7 +241,7 @@ function OfferForm({ slug }: { slug: string }) {
               ))}
             </select>
           </Field>
-          <Field label="Your phone number" hint="Shown to people on this trip.">
+          <Field label="Your phone number">
             <Input name="phone" type="tel" required placeholder="1 234 567 8910" />
           </Field>
         </div>

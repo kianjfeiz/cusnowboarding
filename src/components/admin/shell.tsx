@@ -1,6 +1,12 @@
-import Link from "next/link";
-import type { ReactNode } from "react";
-import { cn } from "@/components/ui";
+import { Children, type ReactNode } from "react";
+import { BackLink, cn } from "@/components/ui";
+
+/**
+ * Every button on a roster card shares this size: a real tap target on a phone,
+ * compact on a desktop where thirty cards are on screen at once. Lives here, not
+ * in the client board, so the server page can use the same string.
+ */
+export const CARD_BUTTON = "h-9 px-3 text-xs sm:h-7 sm:px-2";
 
 export function PageHeader({
   title,
@@ -16,16 +22,7 @@ export function PageHeader({
   return (
     <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
       <div>
-        {back ? (
-          <Link
-            href={back.href}
-            // Vertical padding on an inline link grows the tap target without
-            // taking any extra height in the header.
-            className="py-2 text-xs text-ink-muted underline underline-offset-4 hover:text-ink"
-          >
-            {back.label}
-          </Link>
-        ) : null}
+        {back ? <BackLink href={back.href}>{back.label}</BackLink> : null}
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">{title}</h1>
         {subtitle ? <div className="mt-1.5 text-sm text-ink-muted">{subtitle}</div> : null}
       </div>
@@ -39,16 +36,14 @@ export function Section({
   description,
   actions,
   children,
-  className,
 }: {
   title: string;
   description?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
-  className?: string;
 }) {
   return (
-    <section className={cn("rounded-lg border border-border bg-paper", className)}>
+    <section className="rounded-lg border border-border bg-paper">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3.5">
         <div>
           <h2 className="text-sm font-semibold text-ink">{title}</h2>
@@ -84,6 +79,45 @@ export function Stat({
 /** Wide tables scroll rather than forcing the page to. */
 export function TableWrap({ children }: { children: ReactNode }) {
   return <div className="overflow-x-auto">{children}</div>;
+}
+
+/**
+ * The standard board table. A column is a label, or `[label, className]` when
+ * it needs aligning; `empty` stands in for the rows when there are none.
+ */
+export function DataTable({
+  columns,
+  empty,
+  children,
+}: {
+  columns?: Array<string | [label: string, className: string]>;
+  empty?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <TableWrap>
+      <table className="w-full text-sm">
+        {columns ? (
+          <thead className="border-b border-border">
+            <tr>
+              {columns.map((column, index) => (
+                <Th key={index} className={typeof column === "string" ? undefined : column[1]}>
+                  {typeof column === "string" ? column : column[0]}
+                </Th>
+              ))}
+            </tr>
+          </thead>
+        ) : null}
+        <tbody className="divide-y divide-border">
+          {empty && Children.count(children) === 0 ? (
+            <EmptyRow colSpan={columns?.length ?? 1}>{empty}</EmptyRow>
+          ) : (
+            children
+          )}
+        </tbody>
+      </table>
+    </TableWrap>
+  );
 }
 
 export function Th({ className, children }: { className?: string; children?: ReactNode }) {

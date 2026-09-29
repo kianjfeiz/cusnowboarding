@@ -6,41 +6,27 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 config({ path: [".env.local", ".env"], quiet: true });
 
 /**
- * Migrations run against the direct connection. drizzle's migrator wraps DDL in
+ * Migrations run against the direct connection: drizzle's migrator wraps DDL in
  * a transaction and takes an advisory lock, neither of which survives
- * PgBouncer's transaction pooling intact.
+ * PgBouncer's transaction pooling.
  *
- * This is also the first half of the Vercel build (see `buildCommand` in
+ * This is also the first half of the Vercel build (`buildCommand` in
  * vercel.json), so a deployment's schema exists before its code serves a
- * request. That ordering is not a nicety: shipping code that reads a column the
- * database did not have took sign-in down for every member, and because Auth.js
- * turns any error thrown in the signIn callback into `AccessDenied`, the outage
- * read as "use your CU Boulder account" rather than as a crash. A failed
- * migration must fail the build instead.
+ * request. A failed migration must fail the build: code reading a column the
+ * database lacks surfaces as Auth.js `AccessDenied` for every member.
  */
 async function main() {
-  /*
-    Preview deployments point at the production database, so a branch that
-    nobody has merged must not move its schema. Only a production deploy
-    migrates; run from a laptop VERCEL_ENV is unset and this stays the ordinary
-    manual tool.
-
-    The cost is a preview of a branch carrying a migration running against the
-    old schema, which will break wherever it depends on the new one. A broken
-    preview is the cheaper failure - the alternative is an unreviewed schema
-    change landing on production the moment someone opens a pull request.
-  */
+  // Preview deployments point at the production database, so only a production
+  // deploy migrates. A broken preview is cheaper than an unreviewed schema
+  // change landing on production when someone opens a pull request.
   const vercelEnv = process.env.VERCEL_ENV;
   if (vercelEnv && vercelEnv !== "production") {
     console.log(`Skipping migrations: VERCEL_ENV is "${vercelEnv}", not "production".`);
     return;
   }
 
-  /*
-    On Vercel the fallback below would be the pooler - the one connection the
-    migrator cannot use reliably. Fail with the reason rather than half-apply a
-    migration and leave the schema in a state nobody can name.
-  */
+  // On Vercel the fallback below would be the pooler, which the migrator cannot
+  // use reliably. Fail with the reason rather than half-apply a migration.
   const direct = process.env.DIRECT_DATABASE_URL;
   if (process.env.VERCEL && !direct) {
     throw new Error(

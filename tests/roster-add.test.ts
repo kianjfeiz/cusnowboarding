@@ -1,15 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { claimSpot, generatePayToken } from "@/lib/claims/claim";
 import { pool } from "@/lib/db";
-import { releaseResults } from "@/lib/results";
-import { addMemberToTrip } from "@/lib/roster-add";
-import {
-  createTestTrip,
-  deleteTestTrips,
-  getMemberIds,
-  getSignups,
-  setupPool,
-} from "./helpers";
+import { releaseResults } from "@/lib/roster/results";
+import { addMemberToTrip } from "@/lib/roster/roster-add";
+import { createTestTrip, deleteTestTrips, getMemberIds, getSignups, setupPool } from "./helpers";
 
 let memberIds: string[];
 let boardUserId: string;
@@ -33,9 +27,7 @@ afterAll(async () => {
   // audit_events keeps entity_id as a plain column, so dropping the trips does
   // not take the rows this suite wrote with it - and the actor cannot go while
   // they still point at it.
-  await setupPool.query(`delete from audit_events where actor_board_user_id = $1`, [
-    boardUserId,
-  ]);
+  await setupPool.query(`delete from audit_events where actor_board_user_id = $1`, [boardUserId]);
   await setupPool.query(`delete from board_users where email = 'roster-add-test@colorado.edu'`);
   await setupPool.end();
   await pool.end();
@@ -69,7 +61,10 @@ async function tripRow(tripId: string) {
 
 describe("releaseResults", () => {
   test("closes signups and finalizes the roster in the same transaction", async () => {
-    const tripId = await createTestTrip({ capacity: 5, resultsReleased: false });
+    const tripId = await createTestTrip({
+      capacity: 5,
+      resultsReleased: false,
+    });
     await fill(tripId, 3);
 
     const before = await tripRow(tripId);
@@ -89,7 +84,10 @@ describe("releaseResults", () => {
   });
 
   test("a claim after release is rejected rather than landing on a published roster", async () => {
-    const tripId = await createTestTrip({ capacity: 10, resultsReleased: false });
+    const tripId = await createTestTrip({
+      capacity: 10,
+      resultsReleased: false,
+    });
     await fill(tripId, 2);
 
     await releaseResults(tripId, boardUserId);
@@ -99,8 +97,36 @@ describe("releaseResults", () => {
     expect(await getSignups(tripId)).toHaveLength(2);
   });
 
+  test("emails the riders on the trip, not the waitlist", async () => {
+    const tripId = await createTestTrip({
+      capacity: 2,
+      resultsReleased: false,
+    });
+    await fill(tripId, 3);
+
+    const result = await releaseResults(tripId, null);
+    expect(result.ok).toBe(true);
+
+    // Counted from the rows rather than assumed: a seed member who is on the
+    // board is comped at release, and board seats are not emailed either.
+    const { rows } = await setupPool.query<{
+      riders: number;
+      waitlisted: number;
+    }>(
+      `select count(*) filter (where status in ('held','paid') and not board_seat)::int as riders,
+              count(*) filter (where status = 'waitlisted')::int as waitlisted
+         from signups where trip_id = $1`,
+      [tripId],
+    );
+    expect(rows[0].waitlisted).toBe(1);
+    expect(result.emailed).toBe(rows[0].riders);
+  });
+
   test("refuses a second release", async () => {
-    const tripId = await createTestTrip({ capacity: 5, resultsReleased: false });
+    const tripId = await createTestTrip({
+      capacity: 5,
+      resultsReleased: false,
+    });
     await fill(tripId, 1);
 
     expect((await releaseResults(tripId, boardUserId)).ok).toBe(true);
@@ -110,18 +136,21 @@ describe("releaseResults", () => {
     expect(again.reason).toBe("already_released");
   });
 
-  test("leaves a cancelled trip's status alone", async () => {
+  test("refuses a cancelled trip and leaves it as it was", async () => {
     const tripId = await createTestTrip({
       capacity: 5,
       status: "cancelled",
       resultsReleased: false,
     });
+    const result = await releaseResults(tripId, boardUserId);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("cancelled");
 
-    await releaseResults(tripId, boardUserId);
-
-    // Closing must only ever stop entries. A cancelled trip reported as merely
-    // closed would look live again on every board listing.
-    expect((await tripRow(tripId)).status).toBe("cancelled");
+    // Nobody is emailed about a trip that is not running, and a cancelled trip
+    // reported as merely closed would look live again on every board listing.
+    const after = await tripRow(tripId);
+    expect(after.status).toBe("cancelled");
+    expect(after.results_released_at).toBeNull();
   });
 });
 
@@ -156,10 +185,9 @@ describe("addMemberToTrip", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const { rows } = await setupPool.query<{ created_by_board_user_id: string | null }>(
-      `select created_by_board_user_id from signups where id = $1`,
-      [result.signupId],
-    );
+    const { rows } = await setupPool.query<{
+      created_by_board_user_id: string | null;
+    }>(`select created_by_board_user_id from signups where id = $1`, [result.signupId]);
     // A spot nobody claimed must never be indistinguishable from one that was
     // won, or the drop log stops being a record of the drop.
     expect(rows[0].created_by_board_user_id).toBe(boardUserId);
@@ -202,17 +230,52 @@ describe("addMemberToTrip", () => {
     expect(result.paymentDeadlineAt).toBeNull();
   });
 
-  test("refuses a spot on a full trip", async () => {
+  test("puts them past capacity on a full trip", async () => {
+    // Capacity is a target: the board may run the trip over it.
     const tripId = await createTestTrip({ capacity: 3 });
     await fill(tripId, 3);
 
     const result = await addMemberToTrip(tripId, memberIds[15], boardUserId, "trip");
 
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.status).toBe("held");
+    expect(result.spotNumber).toBe(4);
+  });
+
+  test("refuses the waitlist while the drop can still hand out spots", async () => {
+    // A board-placed position would collide with one a later claim derives
+    // from the counter, and every entrant after that would get an error.
+    const tripId = await createTestTrip({
+      capacity: 3,
+      resultsReleased: false,
+    });
+    await fill(tripId, 1);
+
+    const result = await addMemberToTrip(tripId, memberIds[15], boardUserId, "waitlist");
+
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.reason).toBe("no_free_spot");
-    // Nothing partial was written on the way to refusing.
-    expect(await getSignups(tripId)).toHaveLength(3);
+    expect(result.reason).toBe("spots_open");
+    expect(await getSignups(tripId)).toHaveLength(1);
+  });
+
+  test("a waitlist add on a full, still-open trip leaves later claims working", async () => {
+    const tripId = await createTestTrip({
+      capacity: 2,
+      resultsReleased: false,
+    });
+    await fill(tripId, 3);
+
+    const added = await addMemberToTrip(tripId, memberIds[15], boardUserId, "waitlist");
+    expect(added.ok).toBe(true);
+
+    const late = await claimSpot(pool, tripId, memberIds[16], generatePayToken());
+    expect(late.outcome).toBe("waitlisted");
+    const positions = (await getSignups(tripId))
+      .filter((row) => row.status === "waitlisted")
+      .map((row) => row.waitlist_position);
+    expect(new Set(positions).size).toBe(positions.length);
   });
 
   test("refuses somebody who is already on the trip or its waitlist", async () => {
@@ -223,12 +286,7 @@ describe("addMemberToTrip", () => {
     expect(onTrip.ok).toBe(false);
     if (!onTrip.ok) expect(onTrip.reason).toBe("already_active");
 
-    const waitlisted = await addMemberToTrip(
-      tripId,
-      rows[2].member_id,
-      boardUserId,
-      "trip",
-    );
+    const waitlisted = await addMemberToTrip(tripId, rows[2].member_id, boardUserId, "trip");
     expect(waitlisted.ok).toBe(false);
     if (!waitlisted.ok) expect(waitlisted.reason).toBe("already_active");
   });

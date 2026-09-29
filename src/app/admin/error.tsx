@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Button, Notice } from "@/components/ui";
+import { BackArrow, Button, Notice } from "@/components/ui";
 
 /**
  * Capability guards and roster mutations throw rather than returning false, so
@@ -35,9 +35,10 @@ export default function AdminError({
         <Button onClick={reset}>Try again</Button>
         <Link
           href="/admin"
-          className="inline-flex h-10 items-center rounded-md border border-border-strong px-4 text-sm font-medium hover:bg-surface"
+          className="inline-flex h-10 items-center gap-1.5 rounded-md border border-border-strong px-4 text-sm font-medium hover:bg-surface"
         >
-          Back to dashboard
+          <BackArrow />
+          Dashboard
         </Link>
       </div>
     </div>

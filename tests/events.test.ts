@@ -10,7 +10,7 @@ import {
   validateEventWindow,
   type CalendarItem,
   type ClubEventStatus,
-} from "@/lib/events";
+} from "@/lib/events/events";
 import { createTestTrip, deleteTestTrips, setupPool } from "./helpers";
 
 /**

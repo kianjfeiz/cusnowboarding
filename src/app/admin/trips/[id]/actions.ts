@@ -2,43 +2,38 @@
 
 import { revalidatePath, revalidateTag } from "next/cache";
 import { execute } from "@/lib/db";
-import { promoteFromWaitlist, renumberWaitlist, withTripLock } from "@/lib/promotion";
-import { releaseResults } from "@/lib/results";
+import { renumberWaitlist, withTripLock } from "@/lib/roster/promotion";
+import { releaseResults } from "@/lib/roster/results";
 import {
   addMemberToTrip,
   type RosterAddDestination,
   type RosterAddFailure,
-} from "@/lib/roster-add";
-import { applyRosterAssignment, type RosterEditRefusal } from "@/lib/roster-edit";
-import { sendEmail } from "@/lib/email/send";
-import { gotASpotEmail, waitlistedEmail } from "@/lib/email/result-templates";
-import { promotedEmail } from "@/lib/email/templates";
+} from "@/lib/roster/roster-add";
+import { applyRosterAssignment, type RosterAssignmentResult } from "@/lib/roster/roster-edit";
 import type { RosterSaveResult } from "@/components/admin/roster-board";
 import { requireCapability } from "../../_lib/actor";
 import { recordAudit } from "../../_lib/audit";
+import { text } from "../../_lib/form";
 import { searchAddableMembers, type AddableMember } from "../../_lib/queries";
 
 /**
- * Publishes outcomes to everyone who entered.
- *
- * The board takes fifteen or twenty minutes after a drop to curate the waitlist
- * before anyone is told anything, so this is a deliberate button rather than
- * something the drop does on its own. It is also the ONLY button: it closes
- * signups, publishes outcomes, restarts every payment deadline and finalizes
- * the roster. See releaseResults for why each of those belongs to this moment
- * rather than to a separate press the board has to remember.
+ * Publishes the roster and emails the riders on it. The ONLY button after a drop: it
+ * also closes signups, restarts every payment deadline and finalizes the
+ * roster. See releaseResults for why each of those belongs to this moment.
  */
 export async function releaseTripResults(formData: FormData): Promise<void> {
   const actor = await requireCapability("managePromotions");
 
-  const tripId = String(formData.get("tripId") ?? "");
+  const tripId = text(formData, "tripId");
   const result = await releaseResults(tripId, actor.boardUserId);
 
   if (!result.ok) {
     throw new Error(
       result.reason === "already_released"
-        ? "Results for this trip have already been sent"
-        : "Trip not found",
+        ? "This roster has already been released"
+        : result.reason === "cancelled"
+          ? "This trip is cancelled"
+          : "Trip not found",
     );
   }
 
@@ -46,10 +41,9 @@ export async function releaseTripResults(formData: FormData): Promise<void> {
 }
 
 /**
- * The board posts the whole ordering, not a diff. A diff would have to be
- * rebased against whatever the roster looks like now; a full ordering can simply
- * be rejected if the set of people has changed underneath the coordinator, which
- * is the honest outcome when someone claimed or cancelled mid-edit.
+ * The board posts the whole ordering, not a diff. A full ordering can simply be
+ * rejected if the set of people changed underneath the coordinator, which is
+ * the honest outcome when someone claimed or cancelled mid-edit.
  */
 export async function saveRosterOrder(
   tripId: string,
@@ -59,7 +53,10 @@ export async function saveRosterOrder(
   const actor = await requireCapability("managePromotions");
 
   if (!Array.isArray(onTrip) || !Array.isArray(waitlisted)) {
-    return { ok: false, message: "That ordering could not be read. Reload and try again." };
+    return {
+      ok: false,
+      message: "That ordering could not be read. Reload and try again.",
+    };
   }
 
   const result = await applyRosterAssignment(tripId, actor.boardUserId, {
@@ -67,9 +64,7 @@ export async function saveRosterOrder(
     waitlisted,
   });
 
-  if (!result.ok) {
-    return { ok: false, message: refusalMessage(result.reason, result) };
-  }
+  if (!result.ok) return { ok: false, message: refusalMessage(result) };
 
   refreshTrip(tripId);
 
@@ -79,24 +74,16 @@ export async function saveRosterOrder(
     message:
       `${result.onTripCount} on the trip, ${result.waitlistCount} waitlisted` +
       `${moved > 0 ? `, ${moved} moved between lists` : ""}. ` +
-      "Nobody has been told anything yet.",
+      (result.released
+        ? "Nobody is emailed - tell anyone you moved."
+        : "Nobody has been told anything yet."),
   };
 }
 
-function refusalMessage(
-  reason: RosterEditRefusal | undefined,
-  result: { signupName?: string; capacity?: number; onTripCount?: number },
-): string {
-  switch (reason) {
-    case "already_released":
-      return (
-        "Results for this trip have already been sent. Reload the page - moving " +
-        "someone now goes through Release, Cancel, or Promote, so they are told."
-      );
-    case "over_capacity":
-      return `${result.onTripCount} people for ${result.capacity} spots.`;
+function refusalMessage(result: RosterAssignmentResult): string {
+  switch (result.reason) {
     case "cannot_move_paid":
-      return `${result.signupName ?? "That rider"} has already paid. Refund and cancel them instead.`;
+      return `${result.signupName ?? "That rider"} has already paid. Remove them from the trip and refund them instead.`;
     case "missing_signup":
       return (
         `${result.signupName ?? "Someone"} is on this trip but was not in the list you saved. ` +
@@ -112,29 +99,25 @@ function refusalMessage(
   }
 }
 
-/**
- * Typeahead behind the "Add a rider" box.
- *
- * A read, but still capability-gated: the whole member directory is not
- * something an unauthenticated caller gets to page through one query string at
- * a time.
- */
-export async function searchMembersToAdd(
-  tripId: string,
-  query: string,
-): Promise<AddableMember[]> {
+/** Capability-gated although it only reads: it pages through the member directory. */
+export async function searchMembersToAdd(tripId: string, query: string): Promise<AddableMember[]> {
   await requireCapability("managePromotions");
   return searchAddableMembers(tripId, String(query ?? ""));
 }
 
+const ADD_FAILURES: Record<RosterAddFailure, string> = {
+  already_active: "They are already on this trip or its waitlist.",
+  no_free_spot: "Every spot is taken. Remove someone first, or add them to the waitlist.",
+  spots_open: "The trip still has open spots for the drop. Add them to the trip instead.",
+  member_blocked: "That member is blocked.",
+  member_missing: "That member no longer exists.",
+  trip_missing: "That trip no longer exists.",
+};
+
 /**
- * Puts a member on the trip or the waitlist by hand.
- *
- * Whether this notifies is decided by the trip, not by the board: before
- * results are out nobody has been told anything and a silent add matches every
- * other pre-release move, while afterwards the person is holding a spot with a
- * payment clock running against it. Sending that email is the difference
- * between adding someone and stranding them.
+ * Puts a member on the trip or the waitlist by hand. No email is sent, so a
+ * post-release add leaves someone on a payment clock they have not been told
+ * about - the returned message says so, because telling them is the board's job.
  */
 export async function addRiderToTrip(
   tripId: string,
@@ -148,55 +131,20 @@ export async function addRiderToTrip(
   }
 
   const result = await addMemberToTrip(tripId, memberId, actor.boardUserId, to);
-
-  if (!result.ok) {
-    return { ok: false, message: addFailureMessage(result.reason) };
-  }
+  if (!result.ok) return { ok: false, message: ADD_FAILURES[result.reason] };
 
   refreshTrip(tripId);
 
-  // After the commit, and never allowed to undo it: a mail provider outage
-  // must not take back a spot the board has already given away.
-  let notice = "";
-  if (result.boardSeat) {
-    // The board is not emailed about the trips it runs, so there is nothing to
-    // report beyond what the seat is.
-    notice = "";
-  } else if (result.resultsReleased) {
-    try {
-      if (result.status === "held") {
-        await sendEmail(
-          gotASpotEmail({
-            to: result.memberEmail,
-            firstName: result.memberFirstName,
-            tripTitle: result.tripTitle,
-            spotNumber: result.spotNumber ?? 0,
-            amountCents: result.amountCents,
-            deadline: result.paymentDeadlineAt ?? new Date(),
-            payToken: result.payToken,
-          }),
-        );
-      } else {
-        await sendEmail(
-          waitlistedEmail({
-            to: result.memberEmail,
-            firstName: result.memberFirstName,
-            tripTitle: result.tripTitle,
-          }),
-        );
-      }
-      notice = " They have been emailed.";
-    } catch (error) {
-      console.error("board add notice failed", result.signupId, error);
-      notice = " The email failed to send - tell them yourself.";
-    }
-  } else {
-    notice = " Nobody has been told anything yet.";
-  }
+  // A board seat carries no deadline, so there is nothing to warn about.
+  const notice = result.boardSeat
+    ? ""
+    : result.resultsReleased
+      ? " They are NOT emailed - tell them yourself, or send the unpaid email from Payments."
+      : " Nobody has been told anything yet.";
 
   const where =
     result.status === "board"
-      ? "the trip on a free board seat, which does not use one of the spots"
+      ? "the trip on a board seat (free, and not one of the spots)"
       : result.status === "held"
         ? `spot ${result.spotNumber}`
         : "the end of the waitlist";
@@ -205,21 +153,6 @@ export async function addRiderToTrip(
     ok: true,
     message: `${result.memberName} added to ${where}.${notice}`,
   };
-}
-
-function addFailureMessage(reason: RosterAddFailure): string {
-  switch (reason) {
-    case "already_active":
-      return "They are already on this trip or its waitlist.";
-    case "no_free_spot":
-      return "Every spot is taken. Release someone first, or add them to the waitlist.";
-    case "member_blocked":
-      return "That member is blocked.";
-    case "member_missing":
-      return "That member no longer exists.";
-    case "trip_missing":
-      return "That trip no longer exists.";
-  }
 }
 
 type SignupContext = {
@@ -244,8 +177,7 @@ function refreshTrip(tripId: string): void {
   revalidatePath(`/admin/trips/${tripId}`);
   revalidatePath("/admin/trips");
   revalidatePath("/admin");
-  // Roster and results changes touch the trips table too, and the shared
-  // member-facing caches key off this tag.
+  // The shared member-facing caches key off this tag.
   revalidateTag("trips");
 }
 
@@ -257,56 +189,49 @@ function refreshTrip(tripId: string): void {
 export async function releaseSpot(formData: FormData): Promise<void> {
   const actor = await requireCapability("managePromotions");
 
-  const signupId = String(formData.get("signupId") ?? "");
-  const reason = String(formData.get("reason") ?? "board_release");
+  const signupId = text(formData, "signupId");
+  const reason = "board_release";
   const signup = await loadSignup(signupId);
 
   if (signup.status !== "held") {
-    throw new Error("Only a held spot can be released");
+    throw new Error("That rider has paid or already been removed. Reload the roster.");
   }
 
-  // Takes the trips row lock first, like every other path that moves a spot
-  // around (promoteFromWaitlist, applyRosterAssignment, releaseResults). This
-  // one only ever nulls a spot number so it cannot corrupt the numbering on its
-  // own, but leaving a single write outside the ordering is how a deadlock gets
-  // introduced later by someone who assumes the rule holds everywhere.
-  await withTripLock(signup.trip_id, async (client) => {
-    await client.query(
+  // Under the trips row lock like every other write that moves a spot, even
+  // though this one only nulls a number: one write outside the ordering is how
+  // a deadlock gets introduced later.
+  const released = await withTripLock(signup.trip_id, async (client) => {
+    const result = await client.query(
       `update signups
           set status = 'expired', spot_number = null, released_at = now(),
               release_reason = $2, updated_at = now()
         where id = $1 and status = 'held'`,
       [signupId, reason],
     );
+    return (result.rowCount ?? 0) > 0;
   });
 
-  await recordAudit({
-    actorBoardUserId: actor.boardUserId,
-    action: "signup.release",
-    entityType: "signup",
-    entityId: signupId,
-    data: { tripId: signup.trip_id, memberId: signup.member_id, reason },
-  });
+  // The status was read before the lock, so a concurrent action can win and the
+  // guarded UPDATE match nothing. No mutation, no audit row.
+  if (released) {
+    await recordAudit({
+      actorBoardUserId: actor.boardUserId,
+      action: "signup.release",
+      entityType: "signup",
+      entityId: signupId,
+      data: { tripId: signup.trip_id, memberId: signup.member_id, reason },
+    });
+  }
 
   refreshTrip(signup.trip_id);
 }
 
-/**
- * Cancelling someone who has already paid is a money decision, not a roster
- * one, so it is gated on the treasurer's capability instead.
- *
- * A cancelled waitlister leaves a gap in the waitlist numbering until the next
- * promotion renumbers the list. Positions stay unique, so nothing breaks; the
- * ordering that matters is claim_seq, which never changes.
- */
 export async function cancelSignup(formData: FormData): Promise<void> {
-  const signupId = String(formData.get("signupId") ?? "");
+  const signupId = text(formData, "signupId");
 
-  // Read first so the capability required matches the row's actual state. A
-  // comped board seat reads as `paid` but no money was ever involved, so taking
-  // one back is roster work, not the treasurer's - gating it on managePayments
-  // would mean the coordinator running the trip could not remove a board member
-  // who is not coming.
+  // Read first so the capability matches the row. Cancelling a paid rider is a
+  // money decision, so it is the treasurer's - but a comped board seat reads as
+  // `paid` with no money involved, and taking one back is roster work.
   const signup = await loadSignup(signupId);
   const actor = await requireCapability(
     signup.status === "paid" && !signup.board_seat ? "managePayments" : "managePromotions",
@@ -316,90 +241,37 @@ export async function cancelSignup(formData: FormData): Promise<void> {
     throw new Error("That signup is already inactive");
   }
 
-  await withTripLock(signup.trip_id, async (client) => {
-    await client.query(
+  const cancelled = await withTripLock(signup.trip_id, async (client) => {
+    const result = await client.query(
       `update signups
           set status = 'cancelled', spot_number = null, waitlist_position = null,
               released_at = now(), release_reason = 'board_cancel', updated_at = now()
         where id = $1 and status in ('held','paid','waitlisted')`,
       [signupId],
     );
+    const changed = (result.rowCount ?? 0) > 0;
 
-    // Cancelling a waitlister would otherwise leave a hole in the numbering
-    // until the next promotion happened to close it. Positions stay unique
-    // either way, but a list that reads 1, 2, 4, 5 makes the board wonder what
-    // it is looking at.
-    if (signup.status === "waitlisted") {
+    // Close the hole a cancelled waitlister leaves, so the list never reads
+    // 1, 2, 4, 5.
+    if (changed && signup.status === "waitlisted") {
       await renumberWaitlist(client, signup.trip_id);
     }
+    return changed;
   });
 
-  await recordAudit({
-    actorBoardUserId: actor.boardUserId,
-    action: "signup.cancel",
-    entityType: "signup",
-    entityId: signupId,
-    data: { tripId: signup.trip_id, memberId: signup.member_id, from: signup.status },
-  });
-
-  refreshTrip(signup.trip_id);
-}
-
-/**
- * Promotion itself lives in lib/promotion.ts, which takes the trip row lock and
- * re-checks that a spot is genuinely free. The disabled button here is a
- * courtesy; that transaction is the guarantee.
- */
-export async function promoteSignup(formData: FormData): Promise<void> {
-  const actor = await requireCapability("managePromotions");
-
-  const signupId = String(formData.get("signupId") ?? "");
-  const signup = await loadSignup(signupId);
-
-  const result = await promoteFromWaitlist(signupId, actor.boardUserId);
-  if (!result.ok) {
-    throw new Error(
-      result.reason === "no_free_spot"
-        ? "No spot is free on that trip right now"
-        : "That signup is no longer on the waitlist",
-    );
-  }
-
-  // A promotion nobody is told about is worthless: the member has a payment
-  // deadline running against a spot they do not know they have. Sent after the
-  // transaction commits, and a mail failure must not undo the promotion.
-  try {
-    const [details] = await execute<{
-      trip_title: string;
-      pay_token: string;
-      amount_cents: number;
-      email: string;
-      first_name: string;
-    }>(
-      `select t.title as trip_title, s.pay_token, s.amount_cents,
-              m.email::text as email, m.first_name
-         from signups s
-         join trips t on t.id = s.trip_id
-         join members m on m.id = s.member_id
-        where s.id = $1`,
-      [signupId],
-    );
-
-    if (details && result.spotNumber && result.paymentDeadlineAt) {
-      await sendEmail(
-        promotedEmail({
-          to: details.email,
-          firstName: details.first_name,
-          tripTitle: details.trip_title,
-          spotNumber: result.spotNumber,
-          amountCents: details.amount_cents,
-          deadline: result.paymentDeadlineAt,
-          payToken: details.pay_token,
-        }),
-      );
-    }
-  } catch (error) {
-    console.error("promotion notice failed", signupId, error);
+  // Same reasoning as releaseSpot: no mutation, no audit row.
+  if (cancelled) {
+    await recordAudit({
+      actorBoardUserId: actor.boardUserId,
+      action: "signup.cancel",
+      entityType: "signup",
+      entityId: signupId,
+      data: {
+        tripId: signup.trip_id,
+        memberId: signup.member_id,
+        from: signup.status,
+      },
+    });
   }
 
   refreshTrip(signup.trip_id);

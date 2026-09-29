@@ -1,11 +1,8 @@
 import { execute } from "@/lib/db";
 
 /**
- * Every board mutation leaves a row here.
- *
- * Promotion and offline payment marking are judgement calls made by one person
- * on behalf of the club, so "who did this and when" has to be answerable
- * without reconstructing it from memory.
+ * Every board mutation leaves a row here: these are judgement calls made by one
+ * person on behalf of the club, so "who did this and when" has to be answerable.
  */
 export async function recordAudit(input: {
   actorBoardUserId: string | null;

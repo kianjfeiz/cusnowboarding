@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { SignJWT } from "jose";
-import { issueChallenge } from "@/lib/challenge";
+import { issueChallenge } from "@/lib/claims/challenge";
 
 /** Must match the phrase `createTrip` in tests/helpers.ts stores on the trip. */
 const TEST_PHRASE = "test phrase";
@@ -104,10 +104,10 @@ describe("Test D - concurrent claims over HTTP", () => {
     release();
     const results = await Promise.all(requests);
 
-    expect(results.filter((r) => r.outcome === "held").length).toBe(CAPACITY);
-    expect(results.filter((r) => r.outcome === "waitlisted").length).toBe(
-      CLAIMERS - CAPACITY,
-    );
+    // The response is a receipt and nothing more - the outcome is published by
+    // the board, not by this endpoint. The allocation itself is asserted from
+    // the database rows below.
+    expect(results.filter((r) => r.outcome === "received").length).toBe(CLAIMERS);
 
     const rows = await getSignups(tripId);
     expect(rows.length).toBe(CLAIMERS);

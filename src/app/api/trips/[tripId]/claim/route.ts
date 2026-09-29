@@ -6,8 +6,8 @@ import {
   releaseUnusedSequence,
   type ClaimResult,
 } from "@/lib/claims/claim";
-import { MEMBER_COOKIE, verifyMemberToken } from "@/lib/member-session";
-import { verifyChallenge } from "@/lib/challenge";
+import { MEMBER_COOKIE, verifyMemberToken } from "@/lib/auth/member-session";
+import { verifyChallenge } from "@/lib/claims/challenge";
 import { clientIp, userAgent } from "@/lib/request";
 
 /**
@@ -38,6 +38,23 @@ const OUTCOME_STATUS: Record<ClaimResult["outcome"], number> = {
   full: 409,
   error: 500,
 };
+
+/**
+ * Entrants are told only that their entry was received - the outcome is the
+ * board's to publish, later, all at once. That rule holds for the response
+ * BODY, not just the UI: anything serialized here is one devtools tab away,
+ * and held/waitlisted plus a waitlist number is exactly the scoreboard the
+ * drop is designed not to be. A successful claim can only happen while
+ * signups are open, and results release closes signups, so every one of
+ * these three outcomes is by construction pre-release. The full outcome
+ * still lands in claim_attempts for the board's drop log, and the member
+ * hears it by email when results go out.
+ */
+const RECEIVED: ReadonlySet<ClaimResult["outcome"]> = new Set([
+  "held",
+  "waitlisted",
+  "duplicate",
+]);
 
 export async function POST(
   request: NextRequest,
@@ -114,22 +131,12 @@ export async function POST(
       .catch(() => {});
   });
 
-  const signup = result.signup;
+  if (RECEIVED.has(result.outcome)) {
+    return NextResponse.json({ outcome: "received" }, { status: 200 });
+  }
 
   return NextResponse.json(
-    {
-      outcome: result.outcome,
-      signup: signup
-        ? {
-            spotNumber: signup.spotNumber,
-            waitlistPosition: signup.waitlistPosition,
-            status: signup.status,
-            paymentDeadlineAt: signup.paymentDeadlineAt,
-            payToken: signup.payToken,
-            amountCents: signup.amountCents,
-          }
-        : null,
-    },
+    { outcome: result.outcome },
     { status: OUTCOME_STATUS[result.outcome] },
   );
 }

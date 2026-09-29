@@ -47,24 +47,43 @@ is an attribute of a person, not a separate account type.
 
 ## Roster finalization
 
-`trips.roster_finalized_at` gates the member-facing attendee list, the ride
-sheet and the photo pool. It is written by `releaseResults` at the same instant
-as `results_released_at` - there is no separate "Finalize roster" button, and
+`trips.roster_finalized_at` gates the member-facing attendee list and the ride
+sheet. It is written by `releaseResults` at the same instant as
+`results_released_at` - there is no separate "Finalize roster" button, and
 nothing derives it from the trip date.
 
 It was a second press, days later, so a list that was still churning would not
-be published. That reasoning did not survive contact with the queries: every one
-of those views lists `signups.status = 'paid'` only, and is readable only by
+be published. That reasoning did not survive contact with the queries: both of
+those views list `signups.status = 'paid'` only, and are readable only by
 someone who is themselves paid. At release the list is empty and fills as the
 money lands, so nobody unpaid is ever named. Keep both columns - the member-side
 gate reads `roster_finalized_at` and should not learn about release - but do not
 reintroduce a way to set them apart.
 
+## Photos are club-wide, on the Photos tab
+
+Every trip and every published event has a gallery under `/photos`; any
+signed-in member may view and upload to any of them, and removal stays with the
+uploader or the board. This audience is the board's explicit decision - do not
+reintroduce per-trip attendance gating. The domain rules live in
+`src/lib/photos/photos.ts` (one table, `trip_photos`, holding both subjects with a
+one-subject check constraint); bytes stay in a private R2 bucket behind
+short-lived signed URLs, never public object URLs.
+
+## Email policy: two sends, both board clicks
+
+The ONLY emails this app ever sends are the roster release to riders on the trip (`releaseResults`) and
+the treasurer's unpaid-riders batch on the payments page. There are no cron
+nudges, no promotion/reinstate/expiry notices, and no pre-drop reminder emails
+- members check /me and their status page instead, and the member-facing copy
+says so. Before adding any `sendEmail` call, it must be one of those two
+buttons. The expire-holds cron releases lapsed holds and emails nobody.
+
 ## The trips-row lock ordering rule
 
 Anything that moves a spot number or waitlist position takes `select ... from
 trips ... for update` FIRST, before touching `signups`. Use `withTripLock` in
-`src/lib/promotion.ts`. Every path follows it - promotion, roster editing,
+`src/lib/roster/promotion.ts`. Every path follows it - promotion, roster editing,
 release, reinstate, board release/cancel - so concurrent board actions queue
 instead of deadlocking. A write that skips it is what a future deadlock gets
 traced back to.
@@ -78,19 +97,28 @@ permuting positions in a single UPDATE collides with itself.
 1. Signups open. Members type a signed 5-word phrase; the claim allocates spots
    strictly by server arrival order. Entrants are told only "entry received".
 2. For 15-20 minutes the board curates in the roster editor - dragging people
-   in and out. This is only possible BEFORE results are released.
+   between the trip and the waitlist. Both lists always read in arrival order
+   (the board chooses who is on which list, not the order), so the waitlist
+   shows who is next. Capacity is the target, not a wall: the board may put
+   more people on the trip than it was slated for.
    The board is already on the roster - seats are granted when the trip is
    created - so curation includes removing whoever is not coming.
-3. The board sends results. ONE button, five effects: it comps any board member
+3. The board presses "Release roster and notify". ONE button, five effects: it comps any board member
    who entered the drop by hand, closes signups, sets
    `results_released_at`, resets every payment deadline (the window has to start
    when the member can act on it), and finalizes the roster. All in one
    transaction under the trips row lock, so the trip is never both published and
-   claimable. Irreversible, and the confirmation says so. The expiry and
-   reminder jobs both skip trips where `results_released_at` is null.
-4. Afterwards people drop and others take their place. Release, Cancel, Promote
-   and the "Add a rider" search are the tools; each one notifies, because the
-   roster is public by then.
+   claimable. Irreversible, and the confirmation says so. This is also the
+   FIRST of the only two emails the app sends - to riders on the trip only; the
+   waitlist is not emailed and sees where it stands on its own pages. The expiry job skips trips
+   where `results_released_at` is null.
+4. Afterwards people drop and others take their place. The same drag board
+   stays up: moving someone up off the waitlist is a promotion (spot, fresh
+   payment window, `promoted_at`/`promoted_by`), and a paid rider can never be
+   dragged off - that is a refund, via Cancel. Release, Cancel and the "Add a
+   rider" search are the other tools. None of them email anyone -
+   whoever the board moves, the board tells, or the treasurer's unpaid batch
+   (the second and last email) reaches them with the amount and deadline.
 
 Members are never shown a waitlist number - the board picks from the waitlist
 rather than working down it, so a position would promise a queue that does not
@@ -105,8 +133,9 @@ Fusion owns the money.
 - `trips.payment_url` (falling back to `NEXT_PUBLIC_PAYMENT_URL`) is where
   members are sent. That is the entire integration.
 - `signups.status = 'paid'` records a HUMAN DECISION - the treasurer reconciled
-  a Fusion export, Venmo, or cash. A `payments` row carries the provider and a
-  reference so the decision can be traced back to a source.
+  a Fusion export, Venmo, or cash. A `payments` row carries the provider (Fusion unless the
+  treasurer says otherwise) and any note, and the audit row names who marked it,
+  so the decision can be traced back.
 - Never write code that assumes payment status arrives on its own. There is no
   webhook and no polling endpoint to add later without Fusion shipping an API.
 - Member-facing copy must say plainly that being marked paid lags actually
@@ -116,7 +145,7 @@ Fusion owns the money.
 
 `signups.board_seat` marks a comped board rider. Capacity is a count of PAYING
 riders: 25 means 25 members plus however many of the board are coming, so a
-board seat is not one of the spots. `src/lib/board-seats.ts` is the only place
+board seat is not one of the spots. `src/lib/roster/board-seats.ts` is the only place
 that writes one.
 
 The shape is what enforces it, and each part is load-bearing:
@@ -133,7 +162,7 @@ The shape is what enforces it, and each part is load-bearing:
 - **`status = 'paid'` with `amount_cents = 0`**, enforced by
   `signups_board_seat_free`. They owe nothing, so nothing is outstanding: the
   reaper skips them, the payments screens ignore them, and they see the
-  attendee list and photo pool like anyone else who is going. There is no
+  attendee list like anyone else who is going. There is no
   `payments` row behind one - no money arrived, and the column is the record.
 
 Every occupancy count filters them out (`admin/_lib/queries.ts` TRIP_COUNTS,
@@ -146,7 +175,7 @@ Whoever is not actually coming is removed during curation, which costs no member
 anything. **Nothing here emails the board** - they are not told about the trips
 they run.
 
-Dues are comped the same way. `waiveBoardDues` in `src/lib/dues.ts` writes a
+Dues are comped the same way. `waiveBoardDues` in `src/lib/money/dues.ts` writes a
 `member_dues` row with `waived = true` and amount zero (`member_dues_waived_free`
 enforces the zero) and sets `is_club_member`, so the claim's dues gate stays a
 flag read and never learns about the board. It runs when a board user is added
@@ -188,13 +217,18 @@ ink, ink-muted, ink-faint, accent, accent-hover, accent-soft, alert, alert-soft)
 Reuse the primitives in `src/components/ui.tsx`. Status reads as words first,
 not color-coding.
 
-Motion is purposeful, never decorative: it marks arrival (the shared `rise`
-entrance, staggered at most 8 deep in lists), interaction (hover lifts, the
-150ms press scale on buttons), or live state (the signup pulse dot - the only
-looping animation allowed anywhere). Everything runs under half a second on
-`--ease-soft`, and everything collapses under `prefers-reduced-motion`. No
-gradients as decoration; the nav indicator's `.nav-glass` light model is the
-one standing exception.
+Motion is nearly absent on purpose. Interactive elements get a short
+`transition-colors` (or `transition-opacity`) and nothing else - no entrance
+animations, stagger, hover lifts, press scales or sliding indicators; the nav's
+active tab is a flat `surface-strong` fill. The only animations are the signup
+pulse dot (live state, the one loop allowed), loading skeletons, the upload
+progress bar, a 150ms fade on native dialogs, and the Photos tab's folders
+opening on hover or keyboard focus (the front panel folds down on its hinge and
+the sheets inside rise; transform only, under 400ms, reversing on the way out,
+never looping). The folders are a deliberate exception the owner asked for, not
+a precedent for other cards. Those last two are the only things
+`prefers-reduced-motion` governs in `globals.css`: dialogs skip the fade, and
+folders stay shut and answer with a fill change. No gradients as decoration.
 
 **No emojis anywhere** - not in UI copy, code, comments, or commit messages.
 

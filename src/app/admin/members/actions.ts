@@ -2,19 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { execute } from "@/lib/db";
-import { currentTermYear } from "@/lib/authz";
+import { currentTermYear } from "@/lib/auth/authz";
 import {
   NEW_MEMBER_DUES_CENTS,
   RETURNING_MEMBER_DUES_CENTS,
   duesFor,
   getDuesStatus,
-} from "@/lib/dues";
+} from "@/lib/money/dues";
 import { requireCapability } from "../_lib/actor";
 import { recordAudit } from "../_lib/audit";
-
-function text(formData: FormData, key: string): string {
-  return String(formData.get(key) ?? "").trim();
-}
+import { text } from "../_lib/form";
 
 function flag(formData: FormData, key: string): boolean {
   return text(formData, key) === "true";
@@ -24,11 +21,10 @@ function refreshMembers(): void {
   revalidatePath("/admin/members");
 }
 
-type MemberIdentity = { email: string; first_name: string; last_name: string };
-
-async function loadMember(memberId: string): Promise<MemberIdentity> {
-  const rows = await execute<MemberIdentity>(
-    `select email::text as email, first_name, last_name from members where id = $1`,
+/** Confirms the member exists before anything is written, and names them for the audit row. */
+async function loadMember(memberId: string): Promise<{ email: string }> {
+  const rows = await execute<{ email: string }>(
+    `select email::text as email from members where id = $1`,
     [memberId],
   );
   const row = rows[0];
@@ -36,22 +32,14 @@ async function loadMember(memberId: string): Promise<MemberIdentity> {
   return row;
 }
 
-// ---------------------------------------------------------------------------
-// Single-member flags
-// ---------------------------------------------------------------------------
-
 /**
- * Blocking bumps token_version as well as setting the flag. The member is
- * carrying a signed csc_member cookie that the claim path trusts without a
- * database read, so the flag on its own would not stop them claiming a spot;
- * the version bump is what invalidates that cookie.
- *
- * There is no matching "unverify" control. Signing in with Google is what marks
- * a member verified, and it is the only way in, so clearing the flag would be
- * undone by the member's next sign-in. Blocking is the control that holds.
+ * Blocking bumps token_version as well as setting the flag. The claim path
+ * trusts the signed csc_member cookie without a database read, so the flag on
+ * its own would not stop a claim; the version bump is what invalidates the
+ * cookie.
  */
 export async function setMemberBlocked(formData: FormData): Promise<void> {
-  // Moderation, not board administration - the coordinator running the trip
+  // Moderation, not board administration: the coordinator running the trip
   // needs this on a Friday night, not just the president.
   const actor = await requireCapability("manageMembers");
 
@@ -83,12 +71,9 @@ export async function setMemberBlocked(formData: FormData): Promise<void> {
  * Records or clears dues for the CURRENT season.
  *
  * Two writes, deliberately: `members.is_club_member` is the fast flag the claim
- * statement reads, and `member_dues` is the history that decides whether this
- * person pays the returning rate next year. Setting only the flag would work
- * today and quietly overcharge them next season.
- *
- * Clearing removes only the current season's row. Earlier seasons are what make
- * someone a returning member, and undoing a misclick must not erase that.
+ * statement reads, and `member_dues` is the history that decides the returning
+ * rate next year. Clearing removes only this season's row, so undoing a
+ * misclick cannot erase what makes someone a returning member.
  */
 export async function setMemberDues(formData: FormData): Promise<void> {
   const actor = await requireCapability("managePayments");
@@ -108,17 +93,10 @@ export async function setMemberDues(formData: FormData): Promise<void> {
 
   if (paid) {
     await execute(
-      `insert into member_dues (member_id, term_year, amount_cents, provider, note, recorded_by)
-       values ($1, $2, $3, $4, $5, $6)
+      `insert into member_dues (member_id, term_year, amount_cents, provider, recorded_by)
+       values ($1, $2, $3, 'fusion', $4)
        on conflict (member_id, term_year) do nothing`,
-      [
-        memberId,
-        season,
-        duesFor(status.returning),
-        text(formData, "provider") || "fusion",
-        text(formData, "note") || null,
-        actor.boardUserId,
-      ],
+      [memberId, season, duesFor(status.returning), actor.boardUserId],
     );
   } else {
     await execute(`delete from member_dues where member_id = $1 and term_year = $2`, [
@@ -143,10 +121,6 @@ export async function setMemberDues(formData: FormData): Promise<void> {
   refreshMembers();
 }
 
-// ---------------------------------------------------------------------------
-// Bulk dues import
-// ---------------------------------------------------------------------------
-
 export interface DuesImportState {
   error?: string;
   result?: {
@@ -157,7 +131,7 @@ export interface DuesImportState {
   };
 }
 
-/** Cheap enough to run on a 400-line paste, and it survives quoted CSV cells and `Name <addr>` forms. */
+/** Survives quoted CSV cells and `Name <addr>` forms. */
 const EMAIL_TOKEN = /[^\s,;<>"']+@[^\s,;<>"']+/g;
 
 const MAX_EMAILS = 2000;
@@ -172,10 +146,9 @@ function extractEmails(raw: string): string[] {
 }
 
 /**
- * The treasurer's roster export is the source of truth for dues, but it is not
- * the source of truth for who exists. An address with no member row is reported
- * back rather than inserted: a member created here would have no verified email
- * and no name, and would sit in the roster looking like a real signup.
+ * An address with no member row is reported back rather than inserted: a member
+ * created here would have no Google sign-in and no name, and would sit in the
+ * roster looking like a real signup.
  */
 export async function importDues(
   _prev: DuesImportState,
@@ -191,14 +164,10 @@ export async function importDues(
     return { error: `That is ${emails.length} addresses. Import ${MAX_EMAILS} or fewer at a time.` };
   }
 
-  // `matched` reads the pre-update snapshot, so was_member distinguishes rows
-  // this import actually changed from rows that were already marked.
-  /**
-   * One statement so the flag and the season row cannot diverge. The rate is
-   * decided per member from whether they have a row in an EARLIER season - the
-   * same rule as the single-member path, applied in SQL so a 300-row import
-   * does not become 300 round trips.
-   */
+  // One statement so the flag and the season row cannot diverge. The rate comes
+  // from whether the member has a row in an EARLIER season, the same rule as
+  // the single-member path. `matched` reads the pre-update snapshot, so
+  // was_member separates rows this import changed from rows already marked.
   const season = currentTermYear();
   const matched = await execute<{ email: string; was_member: boolean }>(
     `with matched as (
@@ -238,21 +207,20 @@ export async function importDues(
   const unmatched = emails.filter((email) => !found.has(email));
   const newlyMarked = matched.filter((row) => !row.was_member).length;
 
+  const result = {
+    submitted: emails.length,
+    matched: matched.length,
+    newlyMarked,
+    unmatched,
+  };
+
   await recordAudit({
     actorBoardUserId: actor.boardUserId,
     action: "member.dues.import",
     entityType: "member",
-    data: {
-      submitted: emails.length,
-      matched: matched.length,
-      newlyMarked,
-      unmatched,
-    },
+    data: result,
   });
 
   refreshMembers();
-
-  return {
-    result: { submitted: emails.length, matched: matched.length, newlyMarked, unmatched },
-  };
+  return { result };
 }

@@ -28,10 +28,10 @@ git push
 `noreply@cusnowboarding.com` does **not** need to be a real mailbox. Domain
 verification is what makes the mail deliverable, not an inbox.
 
-## 3. Generate four secrets
+## 3. Generate three secrets
 
 ```bash
-for k in AUTH_SECRET MEMBER_JWT_SECRET VERIFY_PEPPER CRON_SECRET; do
+for k in AUTH_SECRET MEMBER_JWT_SECRET CRON_SECRET; do
   echo "$k=$(openssl rand -base64 32)"
 done
 ```
@@ -47,7 +47,8 @@ In the project → **Settings → Environment Variables**, delete:
   while a manual one exists
 - `DIRECT_DATABASE_URL` - the integration supplies `DATABASE_URL_UNPOOLED`
   instead, which `src/env.ts` reads as a fallback
-- `ALLOW_DEV_LOGIN`, if present
+- `ALLOW_DEV_LOGIN`, `DEMO_PASSWORD` and `VERIFY_PEPPER`, if present - nothing
+  reads them any more
 
 ## 5. Install Neon
 
@@ -77,7 +78,6 @@ Production scope:
 | `NEXT_PUBLIC_BASE_URL` | `https://cusnowboarding.com` |
 | `AUTH_SECRET` | from step 3 |
 | `MEMBER_JWT_SECRET` | from step 3 |
-| `VERIFY_PEPPER` | from step 3 |
 | `CRON_SECRET` | from step 3 |
 | `AUTH_GOOGLE_ID` | same as local |
 | `AUTH_GOOGLE_SECRET` | same as local |
@@ -86,13 +86,13 @@ Production scope:
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | same as local |
 | `NEXT_PUBLIC_PAYMENT_URL` | the club's Fusion link |
 
-Leave `UPSTASH_*` unset. Nothing requires it, and it only throttles photo
-uploads and verification starts - the claim route deliberately does no rate
-limiting at all.
+Photo uploads are throttled in-process; the claim route deliberately does no
+rate limiting at all.
 
 `NEXT_PUBLIC_BASE_URL` is baked in at build time and is what every email link
-is built from. Wrong here means members get pay links pointing at the wrong
-host, and it needs a redeploy to fix, not a restart.
+is built from (the results push and the treasurer's unpaid batch are the only
+two emails the app sends). Wrong here means members get pay links pointing at
+the wrong host, and it needs a redeploy to fix, not a restart.
 
 ## 7. Domain
 
@@ -154,16 +154,18 @@ alter role neondb_owner set statement_timeout = '10s';
 
 1. Open `https://cusnowboarding.com` - you should be redirected to sign-in.
 2. Sign in with your CU Google account. First sign-in asks for your name.
-3. You should land on the board. Create a trip, archive it, delete it from the
-   archive.
-4. Check email actually sends - the drop-reminder or a results email.
+3. You should land on the board. Create a trip, then delete it from the trips
+   list.
+4. Check email actually sends. The only two sends are the results push and the
+   unpaid-riders batch, so use a test trip with yourself as the one rider and
+   press Send results.
 5. `npm run storage:check` against production R2 to prove uploads work.
 
 ## 13. Scheduled jobs
 
 Vercel Hobby allows one cron run per day, and a `*/15` schedule in
-`vercel.json` is a hard **build failure**, not a warning. So `vercel.json` now
-declares daily runs as a floor, and `.github/workflows/cron.yml` provides the
+`vercel.json` is a hard **build failure**, not a warning. So `vercel.json`
+declares one daily run as a floor, and `.github/workflows/cron.yml` provides the
 real cadence every 30 minutes - no extra platform, no cost.
 
 Add two repository secrets under **GitHub → Settings → Secrets and variables →
@@ -179,9 +181,10 @@ Then run it once by hand from the **Actions** tab to prove the auth works. A
 quietly failing for a month is the thing to design against.
 
 On Pro, delete the workflow and set `vercel.json` back to `*/15 * * * *` for
-expire-holds and `0 * * * *` for the two reminder jobs.
+expire-holds - the only scheduled job.
 
 ## Afterwards
+
 - Before the season's first real drop, run `RACE_ITERATIONS=200` against a
   preview deployment on a Neon branch. Local Postgres over loopback is ~0.1ms;
   Vercel-to-Neon is 1-3ms, and only the deployed test shows the true tail.

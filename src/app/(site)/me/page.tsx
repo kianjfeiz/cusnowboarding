@@ -1,53 +1,25 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import type { CSSProperties, ReactNode } from "react";
-import { auth, signIn } from "@/auth";
-import { Badge, Card, Notice, formatDenver, formatMoney } from "@/components/ui";
-import { PhotoStrip } from "@/components/photos/photo-strip";
-import { resolvePhotoViewer } from "@/app/api/photos/_viewer";
-import { getTripPhotoPreview, type TripPhotoPreview } from "@/lib/photos";
-import { listMemberTrips, type MemberTrip } from "@/lib/attendees";
+import type { ReactNode } from "react";
+import { auth } from "@/auth";
+import { Badge, Card, DAY_ONLY, SectionHeading, formatDenver } from "@/components/ui";
+import { listMemberTrips, type MemberTrip } from "@/lib/trips/attendees";
+import { standingOf } from "@/lib/roster/standing";
 import { DrawnTitle } from "@/components/drawn-title";
+import { STANDING_LABEL, StandingNotice } from "../signup-status";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "My trips - CU Snowboarding" };
 
-/** Rows past this point arrive together; only the top of a list is choreography. */
-const STAGGER_LIMIT = 8;
-
-const riseDelay = (index: number): CSSProperties =>
-  ({ "--rise-delay": `${Math.min(index, STAGGER_LIMIT) * 45}ms` }) as CSSProperties;
-
-/** Enough to read as "there are pictures in here" without becoming the gallery. */
-const STRIP_PHOTOS = 4;
-
-/**
- * When the trip runs, as one line.
- *
- * The time of day is dropped on purpose. On this page the question is which
- * weekend it is, and a departure to the minute is the trip page's job - it is
- * also the thing most likely to move between now and then.
- */
+/** Day only: which weekend it is. The departure time is the trip page's job. */
 function tripDates(trip: MemberTrip): string {
-  const day = { month: "short", day: "numeric" } as const;
-  const departs = formatDenver(trip.departAt, {
-    ...day,
-    hour: undefined,
-    minute: undefined,
-    timeZoneName: undefined,
-  });
+  const departs = formatDenver(trip.departAt, DAY_ONLY);
   if (!trip.returnAt) return departs;
 
-  const returns = formatDenver(trip.returnAt, {
-    ...day,
-    hour: undefined,
-    minute: undefined,
-    timeZoneName: undefined,
-  });
+  const returns = formatDenver(trip.returnAt, DAY_ONLY);
   return departs === returns ? departs : `${departs} - ${returns}`;
 }
 
-/** The card's actions. Buttons rather than links, because the card is not one. */
 function CardAction({ href, children }: { href: string; children: ReactNode }) {
   return (
     <Link
@@ -62,67 +34,16 @@ function CardAction({ href, children }: { href: string; children: ReactNode }) {
 export default async function MyTripsPage() {
   const session = await auth();
   const memberId = session?.user?.memberId;
-
-  if (!memberId) {
-    return (
-      <main className="mx-auto max-w-4xl px-5 py-12">
-        <DrawnTitle name="my-trips">My trips</DrawnTitle>
-        <Card className="mt-6">
-          <p className="text-sm text-ink-muted">
-            Sign in to see the trips you are on, pay for a spot, and get to trip
-            photos.
-          </p>
-          <form
-            className="mt-4"
-            action={async () => {
-              "use server";
-              await signIn("google", { redirectTo: "/api/member/arm?next=/me" });
-            }}
-          >
-            <button
-              type="submit"
-              className="inline-flex h-10 items-center rounded-md bg-accent px-4 text-sm font-medium text-white hover:bg-accent-hover"
-            >
-              Sign in with Google
-            </button>
-          </form>
-        </Card>
-      </main>
-    );
-  }
-
-  // The viewer is resolved from cookies and the session, not from the trips,
-  // so the two reads run side by side.
-  const [trips, viewer] = await Promise.all([
-    listMemberTrips(memberId),
-    resolvePhotoViewer(),
-  ]);
-  const now = Date.now();
+  const trips = memberId ? await listMemberTrips(memberId) : [];
 
   // "Past" is decided by the return date rather than by status: a trip you paid
   // for is still upcoming until it actually happens.
-  const endOf = (trip: MemberTrip) =>
-    new Date(trip.returnAt ?? trip.departAt).getTime();
-
-  const upcoming = trips.filter((t) => endOf(t) >= now);
-  const past = trips.filter((t) => endOf(t) < now);
-
-  /*
-    One preview per finalised trip. `getTripPhotoPreview` runs the same
-    entitlement check the gallery does and returns nothing when it fails, so a
-    trip the member was waitlisted on simply has no row - the decision is not
-    re-derived from `trip.status` here, where it could drift.
-  */
-  const previews = new Map(
-    await Promise.all(
-      trips
-        .filter((t) => t.rosterFinalizedAt !== null)
-        .map(
-          async (t) =>
-            [t.tripId, await getTripPhotoPreview(t.tripId, viewer, STRIP_PHOTOS)] as const,
-        ),
-    ),
-  );
+  const now = Date.now();
+  const isPast = (trip: MemberTrip) => new Date(trip.returnAt ?? trip.departAt).getTime() < now;
+  const sections = [
+    { title: "Upcoming", past: false, trips: trips.filter((trip) => !isPast(trip)) },
+    { title: "Past trips", past: true, trips: trips.filter(isPast) },
+  ];
 
   return (
     <main className="mx-auto max-w-4xl px-5 py-10">
@@ -140,148 +61,70 @@ export default async function MyTripsPage() {
         </Card>
       ) : null}
 
-      {upcoming.length > 0 ? (
-        <section className="mt-8">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-faint">
-            Upcoming
-          </h2>
-          <div className="space-y-3">
-            {upcoming.map((trip, index) => (
-              <div key={trip.tripId} className="rise" style={riseDelay(index)}>
-                <TripCard trip={trip} preview={previews.get(trip.tripId)} />
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {past.length > 0 ? (
-        <section className="mt-8">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-ink-faint">
-            Past trips
-          </h2>
-          <div className="space-y-3">
-            {past.map((trip, index) => (
-              <div
-                key={trip.tripId}
-                className="rise"
-                style={riseDelay(upcoming.length + index)}
-              >
-                <TripCard trip={trip} preview={previews.get(trip.tripId)} past />
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
+      {sections.map((section) =>
+        section.trips.length > 0 ? (
+          <section key={section.title} className="mt-8">
+            <SectionHeading className="mb-3">{section.title}</SectionHeading>
+            <div className="space-y-3">
+              {section.trips.map((trip) => (
+                <TripCard key={trip.tripId} trip={trip} past={section.past} />
+              ))}
+            </div>
+          </section>
+        ) : null,
+      )}
     </main>
   );
 }
 
-function TripCard({
-  trip,
-  preview,
-  past = false,
-}: {
-  trip: MemberTrip;
-  /** Null when the photo rules would not let this viewer in. */
-  preview?: TripPhotoPreview | null;
-  past?: boolean;
-}) {
-  const owes = trip.status === "held";
-  const lapsed =
-    owes &&
-    trip.paymentDeadlineAt !== null &&
-    new Date(trip.paymentDeadlineAt).getTime() < Date.now();
+function TripCard({ trip, past }: { trip: MemberTrip; past: boolean }) {
+  const standing = standingOf(trip);
+  const going = standing === "board" || standing === "paid";
+  const emphasis = going
+    ? "strong"
+    : standing === "pending" || standing === "waitlisted"
+      ? "muted"
+      : "normal";
+
+  // The roster and the ride sheet are readable only by riders marked paid, so
+  // nobody else is offered a link that ends at a locked page.
+  const showRosterLinks = going && trip.rosterFinalizedAt !== null;
 
   return (
     <div className="rounded-lg border border-border bg-paper p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          {/* Not a link. The card is a summary with its own two actions; making
-              the whole thing navigate as well gave the same card two
-              destinations depending on where you tapped. */}
-          <p className="font-medium text-ink">{trip.title}</p>
+          <Link
+            href={`/trips/${trip.slug}`}
+            className="font-medium text-ink underline-offset-4 hover:underline"
+          >
+            {trip.title}
+          </Link>
           <p className="mt-1 text-sm text-ink-muted">
             {tripDates(trip)}
             {trip.resort ? ` · ${trip.resort}` : ""}
           </p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {trip.boardSeat ? (
-            // Ahead of the pre-release badge: a board member did not enter the
-            // drop, they were put on the trip when it was created, so "Entry
-            // received" would be telling them about something they never did.
-            <Badge emphasis="strong">Board seat</Badge>
-          ) : !trip.resultsReleased ? (
-            // Same badge whatever the outcome, until the board publishes.
-            <Badge emphasis="muted">Entry received</Badge>
-          ) : trip.status === "paid" ? (
-            // The spot number is an occupancy detail the board needs, not
-            // something a member has to carry around. Being on the trip is the
-            // whole message.
-            <Badge emphasis="strong">Confirmed</Badge>
-          ) : trip.status === "waitlisted" ? (
-            // No number: the board picks from the waitlist rather than working
-            // strictly down it, so a position would promise a queue that is not
-            // how the decision actually gets made.
-            <Badge emphasis="muted">Waitlisted</Badge>
-          ) : lapsed ? (
-            <Badge>Hold lapsed</Badge>
-          ) : (
-            <Badge>Payment due</Badge>
-          )}
-        </div>
+        <Badge emphasis={emphasis}>{STANDING_LABEL[standing]}</Badge>
       </div>
 
-      {owes && !past && trip.resultsReleased ? (
+      {!past && (standing === "due" || standing === "lapsed") ? (
         <div className="mt-4">
-          {lapsed ? (
-            <Notice tone="alert" title="Your hold lapsed">
-              The payment deadline passed, so the spot went back to the waitlist.
-            </Notice>
-          ) : (
-            <Notice tone="accent">
-              <span>
-                {formatMoney(trip.amountCents)} due by{" "}
-                {trip.paymentDeadlineAt ? formatDenver(trip.paymentDeadlineAt) : "the deadline"}.{" "}
-              </span>
-              <Link
-                href={`/pay/${trip.payToken}`}
-                className="font-medium text-accent underline underline-offset-4"
-              >
-                Pay now
-              </Link>
-            </Notice>
-          )}
+          <StandingNotice standing={standing} signup={trip} />
         </div>
       ) : null}
 
-      {/*
-        Only for people the photo rules would actually let in. The row used to
-        render for anyone on a finalised trip, which offered a waitlisted member
-        an "Add photos" link that the gallery then refused.
-      */}
-      {trip.rosterFinalizedAt && preview ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-          <PhotoStrip
-            photos={preview.photos}
-            total={preview.total}
-            tripTitle={trip.title}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Rides only matter before the bus leaves; a past trip's sheet is
-                just stale phone numbers. */}
-            {!past ? (
-              <CardAction href={`/trips/${trip.slug}/rides`}>Find a ride</CardAction>
-            ) : null}
-            {/* The strip beside it already says how many there are, so this
-                stays a verb. With none yet, it says what to do about that. */}
-            <CardAction href={`/trips/${trip.slug}/photos`}>
-              {preview.total > 0 ? "Photos" : "Add photos"}
-            </CardAction>
+      {showRosterLinks || past ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+          {/* A past trip's ride sheet is just stale phone numbers. */}
+          {showRosterLinks && !past ? (
+            <CardAction href={`/trips/${trip.slug}/rides`}>Rides</CardAction>
+          ) : null}
+          {showRosterLinks ? (
             <CardAction href={`/trips/${trip.slug}/roster`}>Roster</CardAction>
-          </div>
+          ) : null}
+          {/* Galleries fill once a trip has happened. */}
+          {past ? <CardAction href={`/photos/trips/${trip.slug}`}>Photos</CardAction> : null}
         </div>
       ) : null}
     </div>

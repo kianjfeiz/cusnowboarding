@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { claimSpot, generatePayToken } from "@/lib/claims/claim";
 import { pool } from "@/lib/db";
-import { applyRosterAssignment } from "@/lib/roster-edit";
+import { applyRosterAssignment } from "@/lib/roster/roster-edit";
 import {
   createTestTrip,
   deleteTestTrips,
@@ -131,6 +131,35 @@ describe("roster editing", () => {
     expect(demoted.spot_number).toBeNull();
   });
 
+  test("a claim landing after a demotion joins the waitlist instead of erroring", async () => {
+    // Curation runs while signups are still open, and demoting a held rider
+    // grows the waitlist without consuming a claim_counter value. The claim
+    // statement derives waitlist_position from the counter, so without the
+    // counter pin in applyRosterAssignment the next entrant computed a
+    // position the demotion already occupied, hit the unique index, was
+    // swallowed by `on conflict do nothing`, and got outcome "error" -
+    // permanently, because releaseUnusedSequence re-issued the same value.
+    const { tripId, rows } = await unreleasedTrip(2, 3);
+    const order = ids(rows);
+
+    const result = await applyRosterAssignment(tripId, null, {
+      onTrip: [order[0]],
+      waitlisted: [order[2], order[1]],
+    });
+    expect(result.ok).toBe(true);
+
+    const late = await claimSpot(pool, tripId, memberIds[3], generatePayToken());
+    expect(late.outcome).toBe("waitlisted");
+    if (late.outcome !== "waitlisted") throw new Error("unreachable");
+    expect(late.signup.waitlistPosition).toBe(3);
+
+    const positions = (await getSignups(tripId))
+      .filter((row) => row.status === "waitlisted")
+      .map((row) => row.waitlist_position)
+      .sort();
+    expect(positions).toEqual([1, 2, 3]);
+  });
+
   test("a full swap of the two lists still lands on dense numbering", async () => {
     // The case the offset rewrite exists for: every position is taken by a
     // different row, so a single UPDATE would collide with itself.
@@ -145,7 +174,7 @@ describe("roster editing", () => {
     await expectWellFormed(tripId, { onTrip, waitlisted, claimSeqs: seqsOf(rows) });
   });
 
-  test("refuses when more people are on the trip than there are spots", async () => {
+  test("puts more people on the trip than it was slated for when the board says so", async () => {
     const { tripId, rows } = await unreleasedTrip(3, 5);
     const order = ids(rows);
 
@@ -154,39 +183,72 @@ describe("roster editing", () => {
       waitlisted: [],
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe("over_capacity");
-    expect(result.capacity).toBe(3);
+    expect(result.ok).toBe(true);
     expect(result.onTripCount).toBe(5);
+    expect(result.capacity).toBe(3);
+    await expectWellFormed(tripId, { onTrip: order, waitlisted: [], claimSeqs: seqsOf(rows) });
 
-    // Refusal leaves the drop's allocation exactly as it was.
-    await expectWellFormed(tripId, {
-      onTrip: order.slice(0, 3),
-      waitlisted: order.slice(3),
-      claimSeqs: seqsOf(rows),
-    });
+    // Signups are still open. The next entrant's number is above every spot the
+    // board handed out, so they land on the waitlist rather than colliding.
+    const late = await claimSpot(pool, tripId, memberIds[5], generatePayToken());
+    expect(late.outcome).toBe("waitlisted");
   });
 
-  test("refuses once results have been sent", async () => {
-    const { tripId, rows } = await unreleasedTrip(3, 4);
+  test("curating a trip that is not full leaves later entrants their spots", async () => {
+    // With nobody waitlisted there is no position to protect, so the counter
+    // must not be pinned up to capacity - that would waitlist everyone after.
+    const { tripId, rows } = await unreleasedTrip(5, 2);
     const order = ids(rows);
-    await setupPool.query(`update trips set results_released_at = now() where id = $1`, [
-      tripId,
-    ]);
 
     const result = await applyRosterAssignment(tripId, null, {
-      onTrip: [order[3], order[1], order[2]],
-      waitlisted: [order[0]],
+      onTrip: [order[1], order[0]],
+      waitlisted: [],
     });
+    expect(result.ok).toBe(true);
 
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe("already_released");
+    const late = await claimSpot(pool, tripId, memberIds[2], generatePayToken());
+    expect(late.outcome).toBe("held");
+    if (late.outcome !== "held") throw new Error("unreachable");
+    expect(late.signup.spotNumber).toBe(3);
+  });
 
-    await expectWellFormed(tripId, {
-      onTrip: order.slice(0, 3),
-      waitlisted: order.slice(3),
-      claimSeqs: seqsOf(rows),
-    });
+  test("after results are sent, a move up is a promotion with its own payment window", async () => {
+    const { tripId, rows } = await unreleasedTrip(3, 4);
+    const order = ids(rows);
+    await setupPool.query(
+      `update trips set results_released_at = now(), roster_finalized_at = now() where id = $1`,
+      [tripId],
+    );
+    await setupPool.query(
+      `update signups set payment_deadline_at = now() - interval '1 hour' where id = $1`,
+      [order[0]],
+    );
+
+    // Everyone on the trip, over capacity: the waitlisted rider comes up.
+    const onTrip = [order[0], order[1], order[2], order[3]];
+    const result = await applyRosterAssignment(tripId, null, { onTrip, waitlisted: [] });
+
+    expect(result.ok).toBe(true);
+    expect(result.released).toBe(true);
+    expect(result.movedToTrip).toEqual([order[3]]);
+    await expectWellFormed(tripId, { onTrip, waitlisted: [], claimSeqs: seqsOf(rows) });
+
+    const { rows: after } = await setupPool.query<{
+      id: string;
+      status: string;
+      promoted: boolean;
+      window_hours: number;
+    }>(
+      `select id, status::text, promoted_at is not null as promoted,
+              round(extract(epoch from payment_deadline_at - now()) / 3600)::int as window_hours
+         from signups where id = any($1::uuid[])`,
+      [[order[0], order[3]]],
+    );
+    const promoted = after.find((row) => row.id === order[3])!;
+    expect(promoted).toMatchObject({ status: "held", promoted: true, window_hours: 48 });
+    // Staying on the trip changes nobody's deadline, lapsed or not.
+    const stayed = after.find((row) => row.id === order[0])!;
+    expect(stayed).toMatchObject({ promoted: false, window_hours: -1 });
   });
 
   test("refuses to move a paid signup to the waitlist", async () => {

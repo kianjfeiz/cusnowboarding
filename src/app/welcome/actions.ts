@@ -2,23 +2,16 @@
 
 import { redirect } from "next/navigation";
 import { execute } from "@/lib/db";
-import { getMemberSession } from "@/lib/member-session";
+import { currentMember } from "@/lib/auth/current-member";
 import { safeNextPath } from "@/lib/request";
-import { loadVerifiedMember } from "@/lib/verification";
 
 /**
- * Saves the name the member just typed and stamps it confirmed, which is what
- * stops the arm bridge detouring them back here on the next sign-in.
- *
- * Identity comes from the claim cookie, which arm minted on the same response
- * that redirected here - deliberately not from the Google session, so this
- * page works the same for any future sign-in method.
+ * Stamps the name confirmed, which is what stops the arm route detouring the
+ * member back here on the next sign-in. Identity comes from the claim cookie
+ * that arm minted on the response that redirected here.
  */
 export async function confirmNameAction(formData: FormData): Promise<void> {
-  const session = await getMemberSession();
-  const member = session
-    ? await loadVerifiedMember(session.memberId, session.tokenVersion)
-    : null;
+  const member = await currentMember();
   if (!member) redirect("/login");
 
   const firstName = String(formData.get("firstName") ?? "").trim().slice(0, 60);

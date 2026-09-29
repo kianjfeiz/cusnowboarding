@@ -1,15 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { Badge, Card, Notice, formatDenver, formatMoney } from "@/components/ui";
-import { AvatarStack, Avatar } from "@/components/avatar";
-import { getAttendeeFaces, isTripAttendee, listAttendees } from "@/lib/attendees";
-import { auth } from "@/auth";
-import { getMemberSession } from "@/lib/member-session";
-import { loadVerifiedMember } from "@/lib/verification";
-import { getMemberSignup, getOccupancy, getTripBySlug } from "@/lib/trips";
-import { issueChallenge } from "@/lib/challenge";
-import { clubPaymentUrl } from "@/lib/payments";
+import { Badge, Card, Detail, Notice, PageHeader, formatDenver, formatMoney } from "@/components/ui";
+import { AvatarStack } from "@/components/avatar";
+import { getAttendeeFaces, isTripAttendee } from "@/lib/trips/attendees";
+import { currentMember } from "@/lib/auth/current-member";
+import { getMemberSignup, getOccupancy, getTripBySlug } from "@/lib/trips/trips";
+import { standingOf } from "@/lib/roster/standing";
+import { issueChallenge } from "@/lib/claims/challenge";
+import { StandingNotice } from "../../signup-status";
 import { ClaimPanel } from "./claim-panel";
 
 export const dynamic = "force-dynamic";
@@ -26,270 +25,123 @@ export async function generateMetadata({
 export default async function TripPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
 
-  // The trip row and the member's identity do not depend on each other, and
-  // everything below needs at most those two, so the page is two database
-  // depths: (trip, member) then one parallel batch. Serial awaits here used to
-  // stack up to six round trips.
-  const [trip, member, session] = await Promise.all([
-    getTripBySlug(slug),
-    (async () => {
-      const session = await getMemberSession();
-      return session
-        ? loadVerifiedMember(session.memberId, session.tokenVersion)
-        : null;
-    })(),
-    auth(),
-  ]);
-
-  const isDemo = session?.user?.isDemo === true;
+  // Two database depths: (trip, member), then one parallel batch.
+  const [trip, member] = await Promise.all([getTripBySlug(slug), currentMember()]);
 
   if (!trip || trip.status === "draft") notFound();
 
-  const paymentLink = trip.paymentUrl || clubPaymentUrl();
+  const released = trip.resultsReleasedAt !== null;
+  const beforeOpen = trip.signupOpensAt.getTime() > Date.now();
+  // Mirrors the claim panel's own clock check, for the page without one.
+  const enterable =
+    (trip.status === "scheduled" || trip.status === "open") &&
+    !(trip.signupClosesAt && trip.signupClosesAt.getTime() <= Date.now());
 
-  const [occupancy, existingSignup, attendance, attendees, challenge] =
-    await Promise.all([
-      getOccupancy(trip.id, trip.capacity),
-      member ? getMemberSignup(trip.id, member.id) : null,
-      trip.rosterFinalizedAt ? getAttendeeFaces(trip.id, 3) : null,
-      trip.rosterFinalizedAt && member
-        ? isTripAttendee(trip.id, member.id).then((went) =>
-            went ? listAttendees(trip.id) : null,
-          )
-        : null,
-      // Issued at render so that at 8:00:00 the client already holds it and
-      // entering costs no extra round trip. An HMAC sign, so issuing it even
-      // when an existing signup will win the render below costs nothing.
-      member ? issueChallenge(trip.id, member.id, trip.signupPhrase) : null,
-    ]);
+  const [occupancy, existingSignup, attendance, entitled, challenge] = await Promise.all([
+    getOccupancy(trip.id, trip.capacity),
+    member ? getMemberSignup(trip.id, member.id) : null,
+    trip.rosterFinalizedAt ? getAttendeeFaces(trip.id, 3) : null,
+    trip.rosterFinalizedAt && member ? isTripAttendee(trip.id, member.id) : false,
+    // Issued at render so that at 8:00:00 the client already holds it and
+    // entering costs no extra round trip. An HMAC sign, so issuing it even
+    // when an existing signup will win the render below costs nothing.
+    member ? issueChallenge(trip.id, member.id, trip.signupPhrase) : null,
+  ]);
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-12">
-      <header className="mb-8">
-        <Link
-          href="/"
-          className="-my-2 inline-flex items-center gap-1.5 py-2 text-sm text-ink-muted transition-colors hover:text-ink"
-        >
-          <span aria-hidden="true">&larr;</span> Home
-        </Link>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight">{trip.title}</h1>
+      <PageHeader back="/" backLabel="Home" title={trip.title}>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Badge emphasis="strong">{formatMoney(trip.priceCents)}</Badge>
           <Badge>
-            {occupancy.taken} of {trip.capacity} spots taken
+            {beforeOpen
+              ? `${trip.capacity} spots`
+              : occupancy.taken > trip.capacity
+                ? `${occupancy.taken} spots taken`
+                : `${occupancy.taken} of ${trip.capacity} spots taken`}
           </Badge>
           {occupancy.waitlisted > 0 ? (
             <Badge emphasis="muted">{occupancy.waitlisted} waitlisted</Badge>
           ) : null}
         </div>
-      </header>
+      </PageHeader>
 
-      <Card className="mb-6">
-        <dl className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-faint">Departs</dt>
-            <dd className="mt-1 text-sm text-ink">{formatDenver(trip.departAt)}</dd>
-          </div>
-          {trip.returnAt ? (
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-ink-faint">Returns</dt>
-              <dd className="mt-1 text-sm text-ink">{formatDenver(trip.returnAt)}</dd>
-            </div>
-          ) : null}
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-faint">Signups open</dt>
-            <dd className="mt-1 text-sm text-ink">{formatDenver(trip.signupOpensAt)}</dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-faint">Cost</dt>
-            <dd className="mt-1 text-sm font-medium text-ink">
-              {formatMoney(trip.priceCents)} per person
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-faint">Payment window</dt>
-            <dd className="mt-1 text-sm text-ink">
-              {trip.paymentWindowHours} hours after results go out
-            </dd>
-          </div>
-        </dl>
-
-        {trip.description ? (
-          <p className="mt-5 border-t border-border pt-5 text-sm text-ink-muted">
-            {trip.description}
-          </p>
-        ) : null}
-
-        {/*
-          Shown to everyone, not just people who got a spot. The cost and where
-          the money goes are the two things members ask before they enter, and
-          burying the link behind winning a spot means the board answers it by
-          hand every time.
-        */}
-        {paymentLink ? (
-          <p className="mt-5 border-t border-border pt-5 text-sm text-ink-muted">
-            Payment is handled on the club portal.{" "}
-            <a
-              href={paymentLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-accent underline underline-offset-4"
-            >
-              Open the payment page
-            </a>
-            . Pay only once you have a spot and a deadline.
-          </p>
-        ) : null}
-      </Card>
-
+      {/* Where the member stands, or the way in, comes before the details:
+          on drop night the phrase must not sit below the fold on a phone. */}
       {existingSignup ? (
-        <ExistingSignup signup={existingSignup} />
-      ) : (
+        <StandingNotice standing={standingOf(existingSignup)} signup={existingSignup} />
+      ) : member && challenge ? (
         <ClaimPanel
           tripId={trip.id}
           signupOpensAtMs={trip.signupOpensAt.getTime()}
           signupClosesAtMs={trip.signupClosesAt?.getTime() ?? null}
-          armed={member !== null}
-          priceCents={trip.priceCents}
-          // A scheduled trip opens itself at signup_opens_at, so the status only
-          // has to say the board has not closed or cancelled it. The countdown
+          // A scheduled trip opens itself at signup_opens_at; the countdown
           // decides the rest, and the claim re-checks the clock server-side.
           isOpenStatus={trip.status === "scheduled" || trip.status === "open"}
           challenge={challenge}
+          enteringAs={`${member.firstName} ${member.lastName} (${member.email})`}
         />
-      )}
-
-      {/*
-        A demo visitor has no member row and can never be armed - /api/member/arm
-        refuses them - so the prompt below would be a button that goes nowhere.
-        The session is already loaded for the header, so this costs no round trip.
-      */}
-      {!member && !existingSignup && !isDemo ? (
-        <Card className="mt-6">
-          <h2 className="text-lg font-semibold">Get ready for this drop</h2>
+      ) : !enterable ? (
+        <Notice title="Signups are closed" />
+      ) : (
+        // Signed in, but without the claim cookie the entry cannot be made.
+        <Card>
+          <h2 className="text-lg font-semibold">Set up this browser to enter</h2>
           <p className="mt-1 mb-5 text-sm text-ink-muted">
-            You are signed in, but this browser is not armed for one-click
-            claiming yet. Arm it now rather than at signup time - the button will
-            not work without it.
+            One click, and best done now rather than when signups open.
           </p>
           <a
             href={`/api/member/arm?next=/trips/${trip.slug}`}
-            className="inline-flex h-10 items-center rounded-md bg-accent px-4 text-sm font-medium text-white hover:bg-accent-hover"
+            className="inline-flex h-10 items-center rounded-md bg-accent px-4 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
           >
-            Arm this browser
+            Set up this browser
           </a>
         </Card>
-      ) : null}
+      )}
 
-      {member && !existingSignup ? (
-        <p className="mt-6 text-center text-xs text-ink-faint">
-          Verified as {member.firstName} {member.lastName} ({member.email})
-        </p>
-      ) : null}
+      <Card className="mt-6">
+        <dl className="grid grid-cols-2 gap-4">
+          <Detail label="Departs">{formatDenver(trip.departAt)}</Detail>
+          {trip.returnAt ? <Detail label="Returns">{formatDenver(trip.returnAt)}</Detail> : null}
+          {trip.resort ? <Detail label="Resort">{trip.resort}</Detail> : null}
+          <Detail label="Cost">
+            <span className="font-medium">{formatMoney(trip.priceCents)}</span>, paid on Fusion
+          </Detail>
+          {beforeOpen ? (
+            <Detail label="Signups open">{formatDenver(trip.signupOpensAt)}</Detail>
+          ) : null}
+          {released ? null : (
+            <Detail label="Payment">
+              Due within {trip.paymentWindowHours} hours of the roster release
+            </Detail>
+          )}
+        </dl>
 
-      {attendees ? (
-        <Card className="mt-6">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">
-              On this trip ({attendees.length})
-            </h2>
-            <Link
-              href={`/trips/${trip.slug}/photos`}
-              className="-my-2 py-2 text-sm text-accent underline underline-offset-4"
-            >
-              Photos
-            </Link>
-          </div>
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {attendees.map((person) => (
-              <li key={person.memberId} className="flex items-center gap-3">
-                <Avatar src={person.imageUrl} name={person.name} size={32} />
-                <div className="min-w-0">
-                  <p className="truncate text-sm">{person.name}</p>
-                  <p className="tnum text-xs text-ink-faint">Spot {person.spotNumber}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      ) : attendance && attendance.total > 0 ? (
+        {trip.description ? (
+          <p className="mt-5 whitespace-pre-line border-t border-border pt-5 text-sm text-ink-muted">
+            {trip.description}
+          </p>
+        ) : null}
+      </Card>
+
+      {attendance && attendance.total > 0 ? (
         <Card className="mt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <AvatarStack people={attendance.faces} total={attendance.total} />
-            <p className="text-xs text-ink-faint">
-              The full list and photos are visible to people who went.
-            </p>
+            <div className="flex items-center gap-3">
+              <AvatarStack people={attendance.faces} />
+              <p className="text-sm text-ink-muted">{attendance.total} confirmed</p>
+            </div>
+            {/* The full roster is for riders who are themselves paid. */}
+            {entitled ? (
+              <Link
+                href={`/trips/${trip.slug}/roster`}
+                className="text-sm font-medium text-accent underline underline-offset-4"
+              >
+                See the roster
+              </Link>
+            ) : null}
           </div>
         </Card>
       ) : null}
     </main>
-  );
-}
-
-function ExistingSignup({
-  signup,
-}: {
-  signup: NonNullable<Awaited<ReturnType<typeof getMemberSignup>>>;
-}) {
-  /**
-   * Before the board publishes outcomes, an entrant learns only that their
-   * entry landed. Same message whether they took spot 3 or missed by twenty -
-   * anything else and reloading this page becomes the scoreboard the drop
-   * design is trying to avoid.
-   */
-  if (!signup.resultsReleased) {
-    return (
-      <Notice tone="accent" title="Entry received">
-        Results usually go out within about twenty minutes of signups opening.
-        You will get an email either way.
-      </Notice>
-    );
-  }
-
-  if (signup.status === "waitlisted") {
-    return (
-      <Notice title="You are on the waitlist">
-        The trip filled up. Spots do open when people drop or holds go unpaid,
-        and the coordinators pull from the waitlist when they do. You will get an
-        email if you get one.
-      </Notice>
-    );
-  }
-
-  if (signup.status === "paid") {
-    return (
-      <Notice tone="accent" title={`Confirmed - spot ${signup.spotNumber}`}>
-        You are paid and on the trip. Nothing more to do.
-      </Notice>
-    );
-  }
-
-  const lapsed =
-    signup.paymentDeadlineAt !== null && signup.paymentDeadlineAt.getTime() < Date.now();
-
-  if (lapsed) {
-    return (
-      <Notice tone="alert" title="Your hold has lapsed">
-        The payment deadline passed, so your spot has been released.
-      </Notice>
-    );
-  }
-
-  return (
-    <Notice tone="accent" title={`You are in - spot ${signup.spotNumber}`}>
-      <p>
-        Your spot is held until{" "}
-        {signup.paymentDeadlineAt ? formatDenver(signup.paymentDeadlineAt) : "the deadline"}.
-        After that it is released to the waitlist.
-      </p>
-      <p className="mt-3">
-        <a
-          className="font-medium text-accent underline underline-offset-4"
-          href={`/pay/${signup.payToken}`}
-        >
-          Pay {formatMoney(signup.amountCents)} now
-        </a>
-      </p>
-    </Notice>
   );
 }

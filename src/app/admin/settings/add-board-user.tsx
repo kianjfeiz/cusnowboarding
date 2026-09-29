@@ -16,7 +16,7 @@ export function AddBoardUser() {
         <Field label="Email" hint="The address they sign in with.">
           <Input name="email" type="email" required placeholder="name@colorado.edu" />
         </Field>
-        <Field label="Name" hint="Optional. Shown in the header and on audit entries.">
+        <Field label="Name" hint="Optional.">
           <Input name="name" maxLength={80} />
         </Field>
       </div>

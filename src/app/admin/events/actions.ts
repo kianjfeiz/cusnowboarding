@@ -9,25 +9,28 @@ import {
   eventAuditAction,
   getEvent,
   insertEvent,
-  isDuplicateSlug,
-  slugifyEvent,
   updateEventRecord,
   updateEventStatus,
   validateEventWindow,
   type ClubEventKind,
   type ClubEventStatus,
   type EventInput,
-} from "@/lib/events";
+} from "@/lib/events/events";
 import { requireCapability } from "../_lib/actor";
 import { recordAudit } from "../_lib/audit";
 import { parseDenverInput } from "../_lib/datetime";
+import { text } from "../_lib/form";
+import { insertWithFreeSlug } from "../_lib/slug";
 
 export interface EventFormState {
   error?: string;
 }
 
-function text(formData: FormData, key: string): string {
-  return String(formData.get(key) ?? "").trim();
+function refreshEvents(): void {
+  revalidatePath("/admin/events");
+  revalidatePath("/calendar");
+  // The shared month-grid cache keys off this tag.
+  revalidateTag("events");
 }
 
 type Parsed = { ok: true; value: EventInput } | { ok: false; error: string };
@@ -35,9 +38,6 @@ type Parsed = { ok: true; value: EventInput } | { ok: false; error: string };
 function parseEventForm(formData: FormData): Parsed {
   const title = text(formData, "title");
   if (!title) return { ok: false, error: "Title is required." };
-
-  const slug = slugifyEvent(text(formData, "slug") || title);
-  if (!slug) return { ok: false, error: "Could not derive a URL slug from that title." };
 
   const kind = text(formData, "kind") as ClubEventKind;
   if (!EVENT_KINDS.includes(kind)) return { ok: false, error: "Pick a kind for this event." };
@@ -52,7 +52,6 @@ function parseEventForm(formData: FormData): Parsed {
   return {
     ok: true,
     value: {
-      slug,
       title,
       kind,
       description: text(formData, "description") || null,
@@ -62,7 +61,6 @@ function parseEventForm(formData: FormData): Parsed {
       startsAt,
       endsAt,
       allDay: formData.get("allDay") === "on",
-      isTwentyOnePlus: formData.get("isTwentyOnePlus") === "on",
     },
   };
 }
@@ -77,26 +75,21 @@ export async function createEvent(
   if (!parsed.ok) return { error: parsed.error };
   const v = parsed.value;
 
-  let eventId: string;
-  try {
-    eventId = await insertEvent(v, actor.boardUserId);
-  } catch (error) {
-    if (isDuplicateSlug(error)) return { error: `The URL slug "${v.slug}" is already taken.` };
-    throw error;
-  }
+  const created = await insertWithFreeSlug(v.title, (slug) =>
+    insertEvent(slug, v, actor.boardUserId),
+  );
+  if (!created) return { error: "The title needs at least one letter or number." };
+  const eventId = created.result;
 
   await recordAudit({
     actorBoardUserId: actor.boardUserId,
     action: "event.create",
     entityType: "event",
     entityId: eventId,
-    data: { slug: v.slug, title: v.title, kind: v.kind, startsAt: v.startsAt },
+    data: { slug: created.slug, title: v.title, kind: v.kind, startsAt: v.startsAt },
   });
 
-  revalidatePath("/admin/events");
-  revalidatePath("/calendar");
-  // The shared month-grid cache keys off this tag.
-  revalidateTag("events");
+  refreshEvents();
   redirect("/admin/events");
 }
 
@@ -113,13 +106,7 @@ export async function updateEvent(
   if (!parsed.ok) return { error: parsed.error };
   const v = parsed.value;
 
-  let found: boolean;
-  try {
-    found = await updateEventRecord(eventId, v);
-  } catch (error) {
-    if (isDuplicateSlug(error)) return { error: `The URL slug "${v.slug}" is already taken.` };
-    throw error;
-  }
+  const found = await updateEventRecord(eventId, v);
   if (!found) return { error: "That event no longer exists." };
 
   await recordAudit({
@@ -127,21 +114,18 @@ export async function updateEvent(
     action: "event.update",
     entityType: "event",
     entityId: eventId,
-    data: { slug: v.slug, title: v.title, kind: v.kind, startsAt: v.startsAt },
+    data: { title: v.title, kind: v.kind, startsAt: v.startsAt },
   });
 
-  revalidatePath("/admin/events");
-  revalidatePath("/calendar");
-  // The shared month-grid cache keys off this tag.
-  revalidateTag("events");
+  refreshEvents();
   redirect("/admin/events");
 }
 
 export async function setEventStatus(formData: FormData): Promise<void> {
   const actor = await requireCapability("manageEvents");
 
-  const eventId = String(formData.get("eventId") ?? "");
-  const target = String(formData.get("status") ?? "") as ClubEventStatus;
+  const eventId = text(formData, "eventId");
+  const target = text(formData, "status") as ClubEventStatus;
 
   const event = await getEvent(eventId);
   if (!event) throw new Error("Event not found");
@@ -160,10 +144,7 @@ export async function setEventStatus(formData: FormData): Promise<void> {
     data: { from: event.status, to: target, slug: event.slug },
   });
 
-  revalidatePath("/admin/events");
-  revalidatePath("/calendar");
-  // The shared month-grid cache keys off this tag.
-  revalidateTag("events");
+  refreshEvents();
 }
 
 /**
@@ -177,7 +158,7 @@ export async function setEventStatus(formData: FormData): Promise<void> {
 export async function deleteEventAction(formData: FormData): Promise<void> {
   const actor = await requireCapability("manageEvents");
 
-  const eventId = String(formData.get("eventId") ?? "");
+  const eventId = text(formData, "eventId");
   const event = await getEvent(eventId);
   if (!event) throw new Error("Event not found");
 
@@ -192,7 +173,5 @@ export async function deleteEventAction(formData: FormData): Promise<void> {
     data: { slug: event.slug, title: event.title, startsAt: event.starts_at },
   });
 
-  revalidatePath("/admin/events");
-  revalidatePath("/calendar");
-  revalidateTag("events");
+  refreshEvents();
 }

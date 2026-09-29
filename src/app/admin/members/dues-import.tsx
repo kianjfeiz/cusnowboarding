@@ -24,9 +24,8 @@ export function DuesImport() {
           className="w-full rounded-md border border-border bg-paper px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
         />
         <span className="mt-1 block text-xs text-ink-muted">
-          Paste a column from the dues spreadsheet. Commas, semicolons, line breaks, and
-          extra columns are all fine - anything that looks like an address is read, the
-          rest is ignored.
+          Paste straight from the dues spreadsheet. Anything that looks like an email
+          address is read; the rest is ignored.
         </span>
       </label>
 

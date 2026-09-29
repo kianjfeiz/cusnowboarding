@@ -1,17 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import type { TripFormState } from "@/app/admin/trips/actions";
 import { Button, Field, Input, Notice } from "@/components/ui";
-import { DateTimePicker } from "@/components/admin/date-time-picker";
-import { DateRangePicker } from "@/components/admin/date-range-picker";
-import { SIGNUP_WINDOW_HOURS } from "@/lib/signup-window";
+import { SIGNUP_WINDOW_HOURS } from "@/lib/claims/signup-window";
 
 export interface TripFormDefaults {
   id?: string;
   title: string;
-  slug: string;
   resort: string;
   description: string;
   departAt: string;
@@ -29,6 +26,18 @@ export interface TripFormDefaults {
 const inputClass =
   "w-full rounded-md border border-border bg-paper px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none";
 
+/*
+  The date fields are the browser's own `datetime-local`. It submits
+  `YYYY-MM-DDTHH:mm` with no zone, which is exactly what parseDenverInput reads
+  as Mountain Time and what toDenverInput writes for the defaults - so the
+  board's own laptop clock never enters into it.
+
+  `scheme-light-dark` is for the parts of the control this palette cannot
+  reach: without it the calendar glyph and the popup stay light-themed and
+  disappear into dark paper.
+*/
+const dateTimeClass = "tnum scheme-light-dark";
+
 export function TripForm({
   action,
   defaults,
@@ -41,6 +50,13 @@ export function TripForm({
   cancelHref: string;
 }) {
   const [state, formAction, pending] = useActionState<TripFormState, FormData>(action, {});
+
+  // In state only so the return can take its `min` from the departure, and the
+  // browser refuses a backwards trip before the server has to. The return is
+  // held too because React resets uncontrolled fields after a rejected save,
+  // which would put it back to its default under a `min` that had not moved.
+  const [departAt, setDepartAt] = useState(defaults.departAt);
+  const [returnAt, setReturnAt] = useState(defaults.returnAt);
 
   // A handful of fields make a trip; the rest have defaults that have been right
   // every time. They stay one click away rather than in the way - but a trip that
@@ -69,25 +85,46 @@ export function TripForm({
           />
         </Field>
 
-        <Field label="Trip dates" hint="Mountain Time. Pick the departure, then the return.">
-          <DateRangePicker
-            startName="departAt"
-            endName="returnAt"
-            startDefault={defaults.departAt}
-            endDefault={defaults.returnAt}
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="Departs" hint="Mountain Time.">
+            <Input
+              type="datetime-local"
+              name="departAt"
+              value={departAt}
+              onChange={(event) => setDepartAt(event.target.value)}
+              required
+              className={dateTimeClass}
+            />
+          </Field>
+          <Field label="Returns" hint="Mountain Time.">
+            <Input
+              type="datetime-local"
+              name="returnAt"
+              value={returnAt}
+              min={departAt || undefined}
+              onChange={(event) => setReturnAt(event.target.value)}
+              required
+              className={dateTimeClass}
+            />
+          </Field>
+        </div>
+
+        <Field
+          label="Signups open"
+          hint={`Mountain Time. Opens by itself, and closes ${SIGNUP_WINDOW_HOURS} hours later.`}
+        >
+          <Input
+            type="datetime-local"
+            name="signupOpensAt"
+            defaultValue={defaults.signupOpensAt}
+            required
+            className={dateTimeClass}
           />
         </Field>
 
         <Field
-          label="Signups open"
-          hint={`Mountain Time. The trip opens itself at this moment and closes ${SIGNUP_WINDOW_HOURS} hours later.`}
-        >
-          <DateTimePicker name="signupOpensAt" defaultValue={defaults.signupOpensAt} required />
-        </Field>
-
-        <Field
           label="Signup phrase"
-          hint="Members type this to enter the drop. It appears on the trip page when signups open. Capitals and extra spaces do not matter."
+          hint="Members type this to enter. It shows on the trip page once signups open."
         >
           <Input
             name="signupPhrase"
@@ -111,11 +148,7 @@ export function TripForm({
           </Field>
           <Field
             label="Capacity"
-            hint={
-              defaults.id
-                ? "Spots on the bus. Raising this after a drop does not let anyone new claim - a spot only goes to an entry numbered at or below capacity, so fill it from the waitlist."
-                : "Spots on the bus."
-            }
+            hint="Paying spots. Board seats are extra."
           >
             <Input
               type="number"
@@ -176,9 +209,7 @@ export function TripForm({
       <details className="rounded-lg border border-border bg-paper" open={extrasSet}>
         <summary className="cursor-pointer px-6 py-4 text-sm font-semibold text-ink">
           Everything else
-          <span className="ml-2 font-normal text-ink-muted">
-            already set, change it if you need to
-          </span>
+          <span className="ml-2 font-normal text-ink-muted">defaults are usually right</span>
         </summary>
 
         <div className="space-y-5 border-t border-border px-6 py-5">
@@ -207,7 +238,7 @@ export function TripForm({
             </Field>
             <Field
               label="Payment window (hours)"
-              hint="How long a won spot is held once results go out."
+              hint="How long a rider has to pay once the roster is released."
             >
               <Input
                 type="number"
@@ -220,10 +251,6 @@ export function TripForm({
               />
             </Field>
           </div>
-
-          <Field label="URL slug" hint="Made from the title if you leave this blank.">
-            <Input name="slug" defaultValue={defaults.slug} maxLength={80} />
-          </Field>
 
           <Field
             label="Payment link"
@@ -247,7 +274,7 @@ export function TripForm({
           href={cancelHref}
           className="inline-flex h-10 items-center text-sm text-ink-muted underline underline-offset-4"
         >
-          Cancel
+          Discard
         </Link>
       </div>
     </form>

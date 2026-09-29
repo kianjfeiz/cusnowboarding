@@ -10,7 +10,7 @@ export const setupPool = new Pool({
   max: 8,
 });
 
-export const POOLED_URL = process.env.DATABASE_URL!;
+const POOLED_URL = process.env.DATABASE_URL!;
 
 export interface TestTripOptions {
   capacity?: number;
@@ -44,14 +44,17 @@ export async function createTestTrip(opts: TestTripOptions = {}): Promise<string
   } = opts;
 
   const slug = `test-trip-${process.pid}-${++tripCounter}-${Date.now()}`;
+  // releaseResults sets results_released_at and roster_finalized_at in the
+  // same statement, so a released trip is always a finalized one; the fixture
+  // mirrors that or it models a state production cannot reach.
   const { rows } = await setupPool.query<{ id: string }>(
     `insert into trips (
        slug, title, depart_at, return_at, price_cents, capacity, waitlist_cap,
        signup_opens_at, payment_window_hours, requires_dues, status,
-       signup_phrase, results_released_at
+       signup_phrase, results_released_at, roster_finalized_at
      ) values ($1, $2, now() + interval '30 days', now() + interval '31 days', $3, $4, $5,
        ${signupOpensAt}, $6, $7, $8::trip_status,
-       'test phrase', ${resultsReleased ? "now()" : "null"})
+       'test phrase', ${resultsReleased ? "now()" : "null"}, ${resultsReleased ? "now()" : "null"})
      returning id`,
     [slug, `Test ${slug}`, priceCents, capacity, waitlistCap, paymentWindowHours, requiresDues, status],
   );

@@ -1,28 +1,41 @@
 "use client";
 
-import { useMemo, useState, useTransition, type DragEvent, type ReactNode } from "react";
-import { Badge, Button, Notice, cn } from "@/components/ui";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
+import { CARD_BUTTON } from "@/components/admin/shell";
+import { Badge, Button, cn } from "@/components/ui";
 
 /**
- * The board the travel coordinator curates on between the drop and "Send
- * results". Nothing here is saved until Save is pressed: dragging thirty people
- * around while each move round-trips would make a slow network feel like the
- * list is fighting back, and a half-applied ordering is exactly the state the
- * server transaction refuses to accept anyway.
+ * The trip's roster as two lists the board drags people between, from the drop
+ * through to the trip itself. Both lists always read in arrival order, so the
+ * waitlist shows who is next; the board decides who is on which list, not the
+ * order. Nothing is saved until Save is pressed: a half-applied change is
+ * exactly the state the server transaction refuses to accept anyway. Capacity
+ * is a target, so the trip list may run over it.
  *
- * Drag-and-drop is the fast path, not the only path. Every card carries move and
- * reorder buttons because this is often done one-handed on a phone, and because
- * a drag gesture is unreachable by keyboard.
+ * Every card carries a move button as well as being draggable, because a drag
+ * is unreachable by keyboard and this is often done one-handed on a phone.
+ *
+ * Board members who may not curate get the same two lists without the moves,
+ * so everyone reads the roster in one shape.
  */
 
 export interface RosterCardData {
   id: string;
   name: string;
   email: string;
-  /** Server arrival order. Never rewritten - it is why the list starts as it does. */
+  /** Server arrival order. Never rewritten; the lists are sorted on it. */
   claimSeq: number;
   isPaid: boolean;
   hasDues: boolean;
+  phone?: string | null;
+  /** Moved up off the waitlist by the board after the roster was released. */
+  promoted?: boolean;
+  /** Payment state once the roster is out, as a word: "Paid", "Unpaid". */
+  status?: string | null;
+  /** The detail after it, e.g. "Due Oct 3, 5:00 PM MDT". */
+  note?: string | null;
+  /** Server-rendered remove button, sized with CARD_BUTTON. */
+  actions?: ReactNode;
 }
 
 export interface RosterSaveResult {
@@ -33,133 +46,76 @@ export interface RosterSaveResult {
 type ListKey = "onTrip" | "waitlisted";
 type Lists = Record<ListKey, string[]>;
 
-const LIST_LABEL: Record<ListKey, string> = {
-  onTrip: "the trip",
-  waitlisted: "the waitlist",
-};
-
-const PAID_EXPLANATION =
-  "Paid - stays on the trip. Removing them is a refund, so use Cancel on the roster.";
-
 export function RosterBoard({
   tripId,
   capacity,
-  cards,
-  initialOnTrip,
-  initialWaitlisted,
+  onTrip,
+  waitlisted,
   save,
+  editable,
   sendAction,
 }: {
   tripId: string;
   capacity: number;
-  cards: RosterCardData[];
-  initialOnTrip: string[];
-  initialWaitlisted: string[];
+  onTrip: RosterCardData[];
+  waitlisted: RosterCardData[];
   save: (
     tripId: string,
     onTrip: string[],
     waitlisted: string[],
   ) => Promise<RosterSaveResult>;
+  /** False shows the lists without drag, move buttons or the save bar. */
+  editable: boolean;
   /**
-   * The "Send results" form, rendered here rather than at the top of the page so
-   * that curating and publishing are one motion. It appears only once the list
-   * on screen matches the list on the server: publishing an arrangement the
-   * board can see but has not saved is the one mistake on this screen that
-   * cannot be taken back.
+   * The "Release roster and notify" form, or null once there is nothing to
+   * release. Shown only while the list on screen matches the list on the
+   * server: publishing an arrangement the board can see but has not saved is
+   * the one mistake here that cannot be taken back.
    */
-  sendAction?: ReactNode;
+  sendAction: ReactNode | null;
 }) {
-  const byId = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
-
+  // Membership lives in state as ids; the cards themselves are always read from
+  // props, so a payment recorded elsewhere shows up on the next refresh.
+  const byId = useMemo(
+    () => new Map([...onTrip, ...waitlisted].map((card) => [card.id, card])),
+    [onTrip, waitlisted],
+  );
+  const inArrivalOrder = (cards: RosterCardData[]) =>
+    [...cards].sort((a, b) => a.claimSeq - b.claimSeq).map((card) => card.id);
   const [baseline, setBaseline] = useState<Lists>({
-    onTrip: initialOnTrip,
-    waitlisted: initialWaitlisted,
+    onTrip: inArrivalOrder(onTrip),
+    waitlisted: inArrivalOrder(waitlisted),
   });
   const [lists, setLists] = useState<Lists>(baseline);
   const [dragId, setDragId] = useState<string | null>(null);
-  const [drop, setDrop] = useState<{ list: ListKey; index: number } | null>(null);
+  const [overList, setOverList] = useState<ListKey | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [result, setResult] = useState<RosterSaveResult | null>(null);
   const [pending, startTransition] = useTransition();
 
+  const baselineOnTrip = new Set(baseline.onTrip);
   const dirty =
-    !sameOrder(lists.onTrip, baseline.onTrip) ||
-    !sameOrder(lists.waitlisted, baseline.waitlisted);
+    lists.onTrip.length !== baseline.onTrip.length ||
+    lists.onTrip.some((id) => !baselineOnTrip.has(id));
   const over = lists.onTrip.length - capacity;
 
-  /**
-   * The action bar is pinned so Save stays reachable from anywhere in a
-   * thirty-card list. On a phone the full sentence wraps to three lines, and a
-   * bar that tall covers the roster it is pinned over - so the phone gets a
-   * shorter form of the same status. The pair is written here, together, so the
-   * two wordings cannot drift apart.
-   */
-  const status = dirty
-    ? {
-        short: "Unsaved changes",
-        full: "Unsaved changes. Nothing has been written and nobody has been told anything.",
-      }
-    : sendAction
-      ? {
-          short: "Saved. Nobody told yet.",
-          full: "The list is saved. Nobody has been told anything yet.",
-        }
-      : { short: "No changes", full: "No changes since the last save." };
-
-  function announce(message: string) {
-    setAnnouncement(message);
-    setResult(null);
-  }
-
-  function moveTo(id: string, toList: ListKey, toIndex: number) {
+  function moveTo(id: string, toList: ListKey) {
     const card = byId.get(id);
-    if (!card) return;
+    const fromList: ListKey = lists.onTrip.includes(id) ? "onTrip" : "waitlisted";
+    if (!card || fromList === toList) return;
 
     if (card.isPaid && toList === "waitlisted") {
-      announce(`${card.name} has paid and cannot be moved off the trip.`);
+      setAnnouncement(`${card.name} has paid and cannot be moved to the waitlist.`);
       return;
     }
 
-    const fromList: ListKey = lists.onTrip.includes(id) ? "onTrip" : "waitlisted";
-    const next: Lists = { onTrip: [...lists.onTrip], waitlisted: [...lists.waitlisted] };
-    const from = next[fromList].indexOf(id);
-    if (from === -1) return;
-
-    next[fromList].splice(from, 1);
-
-    // toIndex was measured against the list before the card was lifted out of it.
-    let index = fromList === toList && from < toIndex ? toIndex - 1 : toIndex;
-    index = Math.max(0, Math.min(index, next[toList].length));
-    next[toList].splice(index, 0, id);
-
-    setLists(next);
-    announce(`${card.name} moved to ${LIST_LABEL[toList]}, position ${index + 1}.`);
-  }
-
-  function nudge(id: string, list: ListKey, delta: -1 | 1) {
-    const order = [...lists[list]];
-    const from = order.indexOf(id);
-    const to = from + delta;
-    if (from === -1 || to < 0 || to >= order.length) return;
-
-    [order[from], order[to]] = [order[to], order[from]];
-    setLists({ ...lists, [list]: order });
-    announce(`${byId.get(id)?.name ?? "Signup"} moved to position ${to + 1}.`);
-  }
-
-  function hoverAt(list: ListKey, index: number) {
-    setDrop((prev) =>
-      prev && prev.list === list && prev.index === index ? prev : { list, index },
-    );
-  }
-
-  function handleDrop(event: DragEvent, list: ListKey, index: number) {
-    event.preventDefault();
-    event.stopPropagation();
-    const id = dragId ?? event.dataTransfer.getData("text/plain");
-    setDragId(null);
-    setDrop(null);
-    if (id) moveTo(id, list, index);
+    const arrival = (other: string) => byId.get(other)?.claimSeq ?? 0;
+    setLists({
+      [fromList]: lists[fromList].filter((other) => other !== id),
+      [toList]: [...lists[toList], id].sort((a, b) => arrival(a) - arrival(b)),
+    } as Lists);
+    setAnnouncement(`${card.name} moved to ${toList === "onTrip" ? "the trip" : "the waitlist"}.`);
+    setResult(null);
   }
 
   function onSave() {
@@ -171,243 +127,203 @@ export function RosterBoard({
     });
   }
 
-  function column(list: ListKey, heading: string, count: string) {
-    const ids = lists[list];
+  function onReset() {
+    setLists(baseline);
+    setResult(null);
+    setAnnouncement("Changes discarded.");
+  }
+
+  function column(list: ListKey, heading: string, count: string, empty: string) {
+    const cards = lists[list].flatMap((id) => byId.get(id) ?? []);
+    const other: ListKey = list === "onTrip" ? "waitlisted" : "onTrip";
 
     return (
-      <section className="rounded-lg border border-border bg-paper">
+      <section
+        onDragOver={
+          editable
+            ? (event) => {
+                event.preventDefault();
+                setOverList(list);
+              }
+            : undefined
+        }
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOverList(null);
+        }}
+        onDrop={
+          editable
+            ? (event) => {
+                event.preventDefault();
+                const id = dragId ?? event.dataTransfer.getData("text/plain");
+                setDragId(null);
+                setOverList(null);
+                if (id) moveTo(id, list);
+              }
+            : undefined
+        }
+        className={cn(
+          "min-w-0 rounded-lg border bg-paper transition-colors",
+          dragId && overList === list ? "border-accent" : "border-border",
+        )}
+      >
         <header className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold">{heading}</h2>
-          <span className="tnum text-xs text-ink-faint">{count}</span>
+          <span className="tnum text-xs text-ink-muted">{count}</span>
         </header>
 
-        <ul
-          className="space-y-1 p-2"
-          onDragOver={(event) => {
-            event.preventDefault();
-            hoverAt(list, ids.length);
-          }}
-          onDrop={(event) => handleDrop(event, list, ids.length)}
-        >
-          {ids.length === 0 ? (
+        <ul className="space-y-2 p-2">
+          {cards.length === 0 ? (
             <li className="rounded-md border border-dashed border-border px-3 py-8 text-center text-sm text-ink-faint">
-              Empty. Drag someone across, or use the move buttons.
+              {empty}
             </li>
           ) : null}
 
-          {ids.map((id, index) => {
-            const card = byId.get(id);
-            if (!card) return null;
-
+          {cards.map((card, index) => {
+            // A paid rider cannot go to the waitlist, so there is nowhere to drag them.
+            const movable = editable && !(card.isPaid && list === "onTrip");
+            const hasStatus = card.status || card.note || card.promoted || !card.hasDues;
             return (
-              <li key={id}>
-                <Indicator active={drop?.list === list && drop.index === index} />
-                <div
-                  draggable={!card.isPaid}
-                  onDragStart={(event) => {
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", id);
-                    setDragId(id);
-                  }}
-                  onDragEnd={() => {
-                    setDragId(null);
-                    setDrop(null);
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    const box = event.currentTarget.getBoundingClientRect();
-                    const before = event.clientY < box.top + box.height / 2;
-                    hoverAt(list, before ? index : index + 1);
-                  }}
-                  onDrop={(event) => {
-                    const box = event.currentTarget.getBoundingClientRect();
-                    const before = event.clientY < box.top + box.height / 2;
-                    handleDrop(event, list, before ? index : index + 1);
-                  }}
-                  className={cn(
-                    "rounded-md border px-3 py-2.5 transition-colors",
-                    dragId === id
-                      ? "border-accent bg-accent-soft"
-                      : "border-border bg-paper",
-                    card.isPaid ? "cursor-default" : "cursor-grab",
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        <span className="tnum text-ink-faint">{index + 1}.</span>{" "}
-                        {card.name}
-                      </p>
-                      <p className="truncate text-xs text-ink-muted">{card.email}</p>
+              <li
+                key={card.id}
+                draggable={movable}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", card.id);
+                  setDragId(card.id);
+                }}
+                onDragEnd={() => {
+                  setDragId(null);
+                  setOverList(null);
+                }}
+                className={cn(
+                  "rounded-md border px-3 py-2 transition-colors",
+                  dragId === card.id ? "border-accent bg-accent-soft" : "border-border bg-paper",
+                  movable ? "cursor-grab" : "cursor-default",
+                )}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                  <div className="min-w-0 flex-1 basis-44">
+                    <p className="truncate text-sm font-medium">
+                      <span className="tnum text-ink-faint">{index + 1}.</span> {card.name}
+                    </p>
+                    <p className="truncate text-xs text-ink-muted">
+                      {card.email}
+                      {card.phone ? ` · ${card.phone}` : ""}
+                    </p>
+                    {hasStatus ? (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
+                        {card.status ? (
+                          <Badge emphasis={card.isPaid ? "strong" : "normal"}>{card.status}</Badge>
+                        ) : null}
+                        {card.hasDues ? null : <Badge>No dues</Badge>}
+                        {card.promoted ? <Badge emphasis="muted">Moved up</Badge> : null}
+                        {card.note ? <span>{card.note}</span> : null}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {movable || card.actions ? (
+                    <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                      {movable ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => moveTo(card.id, other)}
+                          className={CARD_BUTTON}
+                        >
+                          {list === "onTrip" ? "Move to waitlist" : "Move to trip"}
+                        </Button>
+                      ) : null}
+                      {/* A remove reloads the board from the server, which would
+                          drop unsaved moves, so it waits until they are saved. */}
+                      <fieldset disabled={dirty} className="contents">
+                        {card.actions}
+                      </fieldset>
                     </div>
-                    <span
-                      className="tnum shrink-0 text-xs text-ink-faint"
-                      title="Arrival order on drop night"
-                    >
-                      #{card.claimSeq}
-                    </span>
-                  </div>
-
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {card.isPaid ? <Badge emphasis="strong">Paid</Badge> : null}
-                    <Badge emphasis={card.hasDues ? "muted" : "normal"}>
-                      {card.hasDues ? "Dues paid" : "No dues"}
-                    </Badge>
-                  </div>
-
-                  {card.isPaid ? (
-                    <p className="mt-1.5 text-xs text-ink-faint">{PAID_EXPLANATION}</p>
                   ) : null}
-
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    <Small
-                      onClick={() => nudge(id, list, -1)}
-                      disabled={index === 0}
-                      label={`Move ${card.name} up`}
-                    >
-                      Up
-                    </Small>
-                    <Small
-                      onClick={() => nudge(id, list, 1)}
-                      disabled={index === ids.length - 1}
-                      label={`Move ${card.name} down`}
-                    >
-                      Down
-                    </Small>
-                    <Small
-                      onClick={() =>
-                        list === "onTrip"
-                          ? moveTo(id, "waitlisted", lists.waitlisted.length)
-                          : moveTo(id, "onTrip", lists.onTrip.length)
-                      }
-                      disabled={card.isPaid}
-                      title={card.isPaid ? PAID_EXPLANATION : undefined}
-                      label={
-                        list === "onTrip"
-                          ? `Move ${card.name} to the waitlist`
-                          : `Move ${card.name} to the trip`
-                      }
-                    >
-                      {list === "onTrip" ? "Move to waitlist" : "Move to trip"}
-                    </Small>
-                  </div>
                 </div>
               </li>
             );
           })}
-
-          <li>
-            <Indicator active={drop?.list === list && drop.index === ids.length} />
-          </li>
         </ul>
       </section>
     );
   }
 
+  // Once the roster is out and nothing is pending there is nothing to say, so
+  // the bar only appears for a change, a save result, or the release itself.
+  const showBar = editable && (dirty || result !== null || sendAction !== null);
+  const releasePrompt = !dirty && sendAction !== null;
+
   return (
     <div className="space-y-4">
-      {over > 0 ? (
-        <Notice tone="alert" title="More people than seats">
-          {lists.onTrip.length} on the trip against a capacity of {capacity}. Move{" "}
-          {over} {over === 1 ? "person" : "people"} to the waitlist before saving.
-        </Notice>
-      ) : null}
-
-      {result ? (
-        <Notice tone={result.ok ? "accent" : "alert"} title={result.ok ? "Saved" : "Not saved"}>
-          {result.message}
-        </Notice>
-      ) : null}
-
       <div className="grid gap-4 md:grid-cols-2">
         {column(
           "onTrip",
-          `On the trip (${lists.onTrip.length}/${capacity})`,
-          capacity - lists.onTrip.length > 0
-            ? `${capacity - lists.onTrip.length} free`
-            : over > 0
-              ? `${over} over`
-              : "Full",
+          "On the trip",
+          `${lists.onTrip.length}/${capacity}${
+            over < 0 ? ` · ${-over} free` : over > 0 ? ` · ${over} over` : " · full"
+          }`,
+          "Nobody on the trip yet.",
         )}
-        {column("waitlisted", "Waitlist", `${lists.waitlisted.length} waiting`)}
+        {column("waitlisted", "Waitlist", `${lists.waitlisted.length} waiting`, "Nobody waitlisted.")}
       </div>
 
-      <div className="sticky bottom-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3">
-        <p className="text-sm text-ink-muted">
-          <span className="sm:hidden">{status.short}</span>
-          <span className="hidden sm:inline">{status.full}</span>
-        </p>
-        <div className="flex gap-2">
-          {dirty ? (
-            <>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setLists(baseline);
-                  announce("Changes discarded.");
-                }}
-                disabled={pending}
-              >
-                Reset
-              </Button>
-              <Button onClick={onSave} disabled={pending || over > 0}>
-                {pending ? "Saving" : "Save order"}
-              </Button>
-            </>
-          ) : (
-            sendAction
+      {showBar ? (
+        // Pinned so Save and Release stay reachable from anywhere in a
+        // thirty-card list.
+        <div
+          className={cn(
+            "sticky bottom-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3",
+            releasePrompt ? "border-accent/30 bg-accent-soft" : "border-border bg-surface",
           )}
+        >
+          <p className="min-w-0 flex-1 basis-64 text-sm">
+            {dirty ? (
+              result && !result.ok ? (
+                <span className="text-alert">{result.message}</span>
+              ) : (
+                <>
+                  <span className="font-medium">Unsaved changes.</span>
+                  {sendAction ? (
+                    <span className="text-ink-muted"> Save them before releasing the roster.</span>
+                  ) : null}
+                </>
+              )
+            ) : releasePrompt ? (
+              <>
+                {result?.ok ? <span className="font-medium">Saved. </span> : null}
+                <span className="text-ink-muted">
+                  {lists.onTrip.length === 0
+                    ? "Nobody is on the trip, so releasing only closes signups."
+                    : `Releasing closes signups and emails the ${lists.onTrip.length} on the trip. The waitlist and board seats are not emailed.`}{" "}
+                  It cannot be undone.
+                </span>
+              </>
+            ) : (
+              <span className="font-medium">Saved.</span>
+            )}
+          </p>
+          <div className="flex gap-2">
+            {dirty ? (
+              <>
+                <Button variant="secondary" onClick={onReset} disabled={pending}>
+                  Reset
+                </Button>
+                <Button onClick={onSave} disabled={pending}>
+                  {pending ? "Saving" : "Save"}
+                </Button>
+              </>
+            ) : (
+              sendAction
+            )}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <p aria-live="polite" className="sr-only">
         {announcement}
       </p>
     </div>
   );
-}
-
-function Indicator({ active }: { active: boolean }) {
-  return (
-    <div
-      aria-hidden
-      className={cn("my-1 h-0.5 rounded", active ? "bg-accent" : "bg-transparent")}
-    />
-  );
-}
-
-function Small({
-  children,
-  onClick,
-  disabled,
-  title,
-  label,
-}: {
-  children: string;
-  onClick: () => void;
-  disabled?: boolean;
-  title?: string;
-  label: string;
-}) {
-  return (
-    <Button
-      type="button"
-      variant="secondary"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      aria-label={label}
-      // Curating is a phone job, and these are the touch path off the drag
-      // gesture, so they get a real tap target there and stay compact on a
-      // desktop where thirty of them are on screen at once.
-      className="h-9 px-3 text-xs sm:h-7 sm:px-2"
-    >
-      {children}
-    </Button>
-  );
-}
-
-function sameOrder(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((id, i) => id === b[i]);
 }

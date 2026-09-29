@@ -2,15 +2,14 @@ import Link from "next/link";
 import { EmptyRow, PageHeader, Section, TableWrap, Td, Th } from "@/components/admin/shell";
 import { SubmitButton } from "@/components/admin/submit-button";
 import { Badge, Button, formatDenver } from "@/components/ui";
-import { can } from "@/lib/authz";
+import { can } from "@/lib/auth/authz";
 import {
   EVENT_KIND_LABELS,
-  EVENT_STATUS_HINTS,
   EVENT_STATUS_LABELS,
   eventTransitionLabel,
   listEvents,
   nextEventStatuses,
-} from "@/lib/events";
+} from "@/lib/events/events";
 import { requireActor } from "../_lib/actor";
 import { deleteEventAction, setEventStatus } from "./actions";
 
@@ -25,7 +24,7 @@ export default async function AdminEventsPage() {
     <>
       <PageHeader
         title="Events"
-        subtitle="Parties, meetings and socials. Published events show up on the member calendar alongside trips."
+        subtitle="Published events show on the member calendar."
         actions={
           mayManage ? (
             <Link href="/admin/events/new">
@@ -35,7 +34,7 @@ export default async function AdminEventsPage() {
         }
       />
 
-      <Section title={`${events.length} events`}>
+      <Section title={`${events.length} event${events.length === 1 ? "" : "s"}`}>
         <TableWrap>
           <table className="w-full text-sm">
             <thead className="border-b border-border">
@@ -66,7 +65,6 @@ export default async function AdminEventsPage() {
                       )}
                       <span className="mt-0.5 block text-xs text-ink-faint">
                         {event.location_name ?? "No location set"}
-                        {event.is_twenty_one_plus ? " · 21+" : ""}
                       </span>
                     </Td>
                     <Td className="text-ink-muted">{EVENT_KIND_LABELS[event.kind]}</Td>
@@ -74,9 +72,6 @@ export default async function AdminEventsPage() {
                       <Badge emphasis={event.status === "published" ? "strong" : "normal"}>
                         {EVENT_STATUS_LABELS[event.status]}
                       </Badge>
-                      <span className="mt-0.5 block text-xs text-ink-faint">
-                        {EVENT_STATUS_HINTS[event.status]}
-                      </span>
                     </Td>
                     <Td className="whitespace-nowrap text-ink-muted">
                       {event.all_day
@@ -111,7 +106,7 @@ export default async function AdminEventsPage() {
                                     : `Delete "${event.title}"? This cannot be undone.`
                                 }
                               >
-                                Delete
+                                Delete event
                               </SubmitButton>
                             </form>
                           </>

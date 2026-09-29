@@ -88,62 +88,54 @@ async function main() {
   await db.insert(schema.members).values(memberRows).onConflictDoNothing();
   console.log(`members: ${memberRows.length} (verified, dues paid)`);
 
-  const [openTrip] = await db
+  const shared = {
+    capacity: 25,
+    waitlistCap: 50,
+    paymentWindowHours: 48,
+    requiresDues: true,
+    paymentUrl: "https://club.fusionfamily.com/@/cusportclubs",
+    createdBy: president?.id,
+  };
+
+  const seededTrips = await db
     .insert(schema.trips)
-    .values({
-      slug: "winter-park-jan-24",
-      title: "Winter Park - Jan 24",
-      resort: "Winter Park",
-      departAt: hoursFromNow(24 * 30),
-      returnAt: hoursFromNow(24 * 32),
-      description: "Two nights, Airbnb in Fraser. Lift tickets not included.",
-      priceCents: 8500,
-      capacity: 25,
-      waitlistCap: 50,
-      // Already open, so the public claim page is immediately exercisable.
-      signupOpensAt: hoursFromNow(-1),
-      signupPhrase: "first chair fraser",
-      paymentWindowHours: 48,
-      requiresDues: true,
-      paymentUrl: "https://club.fusionfamily.com/@/cusportclubs",
-      status: "open",
-      createdBy: president?.id,
-    })
+    .values([
+      {
+        ...shared,
+        slug: "winter-park-jan-24",
+        title: "Winter Park - Jan 24",
+        resort: "Winter Park",
+        departAt: hoursFromNow(24 * 30),
+        returnAt: hoursFromNow(24 * 32),
+        description: "Two nights, Airbnb in Fraser. Lift tickets not included.",
+        priceCents: 8500,
+        // Already open, so the public claim page is immediately exercisable.
+        signupOpensAt: hoursFromNow(-1),
+        signupPhrase: "first chair fraser",
+        status: "open",
+      },
+      {
+        ...shared,
+        slug: "breckenridge-feb-14",
+        title: "Breckenridge - Feb 14",
+        resort: "Breckenridge",
+        departAt: hoursFromNow(24 * 60),
+        returnAt: hoursFromNow(24 * 62),
+        description: "Three nights. The big one.",
+        priceCents: 14500,
+        // Scheduled but not yet open, for exercising the countdown.
+        signupOpensAt: hoursFromNow(2),
+        signupPhrase: "send it breck",
+        status: "scheduled",
+      },
+    ])
     .onConflictDoNothing()
     .returning();
-
-  const [scheduledTrip] = await db
-    .insert(schema.trips)
-    .values({
-      slug: "breckenridge-feb-14",
-      title: "Breckenridge - Feb 14",
-      resort: "Breckenridge",
-      departAt: hoursFromNow(24 * 60),
-      returnAt: hoursFromNow(24 * 62),
-      description: "Three nights. The big one.",
-      priceCents: 14500,
-      capacity: 25,
-      waitlistCap: 50,
-      // Scheduled but not yet open, for exercising the countdown.
-      signupOpensAt: hoursFromNow(2),
-      signupPhrase: "send it breck",
-      paymentWindowHours: 48,
-      requiresDues: true,
-      paymentUrl: "https://club.fusionfamily.com/@/cusportclubs",
-      status: "scheduled",
-      createdBy: president?.id,
-    })
-    .onConflictDoNothing()
-    .returning();
-
-  console.log(
-    `trips: ${[openTrip, scheduledTrip].filter(Boolean).length} (1 open, 1 scheduled)`,
-  );
 
   await pool.end();
+  console.log(`trips: ${seededTrips.length} new`);
   console.log("\nSeed complete.");
-  if (openTrip) console.log(`  open trip:      /trips/${openTrip.slug}`);
-  if (scheduledTrip) console.log(`  scheduled trip: /trips/${scheduledTrip.slug}`);
+  for (const trip of seededTrips) console.log(`  ${trip.status} trip: /trips/${trip.slug}`);
 }
 
 main().catch((error) => {

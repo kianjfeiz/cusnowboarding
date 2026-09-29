@@ -3,25 +3,14 @@ import { config } from "dotenv";
 config({ path: [".env.local", ".env"], quiet: true });
 
 /**
- * Proves the photo bucket actually works, end to end, before a trip depends on
- * it.
+ * `npm run storage:check` - proves the photo bucket works end to end, in the
+ * order the app uses it: presign a PUT, upload the way a browser would, confirm
+ * the bytes landed, presign a GET, read them back, delete. The one object it
+ * writes lives under `_healthcheck/`, outside the prefixes the app uses.
  *
- * Every step the app performs is performed here in the same order: presign a
- * PUT, upload over plain HTTP the way a browser would, confirm the bytes
- * landed, presign a GET, read them back, delete. A misconfiguration usually
- * looks fine until exactly one of these fails, and the failure surfaces to a
- * member as a silent broken image on a trip page.
- *
- *   npm run storage:check
- *
- * It writes and removes one small object under `_healthcheck/`, which is
- * deliberately outside the `trips/` prefix the app uses so nothing here can
- * collide with a real photo.
- *
- * What it cannot check is browser CORS: this script is not a browser, so its
- * PUT carries no Origin header and R2 never applies a CORS rule to it. A green
- * run here plus a failing upload in the app is very likely a missing CORS
- * policy on the bucket - see README.
+ * It cannot check browser CORS: its PUT carries no Origin header. A green run
+ * plus a failing upload in the app is very likely a missing CORS policy on the
+ * bucket - see README.
  */
 
 const KEY = `_healthcheck/${Date.now()}.txt`;
@@ -36,18 +25,12 @@ function fail(message: string, detail?: unknown): never {
 
 async function main() {
   const { isPhotoStorageConfigured, presignUpload, presignRead, headObject, deleteObject } =
-    await import("../src/lib/storage/r2");
+    await import("../src/lib/photos/r2");
 
   console.log("Photo storage check\n");
 
-  const present = (name: string) => (process.env[name] ? "set" : "MISSING");
-  for (const name of [
-    "R2_ACCOUNT_ID",
-    "R2_ACCESS_KEY_ID",
-    "R2_SECRET_ACCESS_KEY",
-    "R2_BUCKET",
-  ]) {
-    console.log(`  ${name.padEnd(22)} ${present(name)}`);
+  for (const name of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"]) {
+    console.log(`  ${name.padEnd(22)} ${process.env[name] ? "set" : "MISSING"}`);
   }
 
   if (!isPhotoStorageConfigured()) {
@@ -96,20 +79,16 @@ async function main() {
   if (body !== BODY) fail("the bytes read back did not match the bytes written");
   console.log("  signed read            ok");
 
-  /*
-    The bucket must not serve this object without a signature. A public bucket
-    would hand every trip photo to anyone with the URL, which is the one thing
-    lib/photos.ts exists to prevent, so it is worth an explicit probe rather
-    than an assumption.
-  */
+  // A public bucket would hand every photo to anyone with the URL, so probe
+  // for it rather than assume.
   const unsigned = new URL(readUrl);
   unsigned.search = "";
   const anonymous = await fetch(unsigned.toString());
   if (anonymous.ok) {
     fail(
       "the object is readable WITHOUT a signature - the bucket is public.\n" +
-        "  Turn off public access. These are identifiable photos of students and the\n" +
-        "  access rule is per trip roster, which a public URL cannot express.",
+        "  Turn off public access. These are identifiable photos of students, and\n" +
+        "  the galleries are for signed-in members only.",
     );
   }
   console.log(`  private without signature  ok (${anonymous.status})`);

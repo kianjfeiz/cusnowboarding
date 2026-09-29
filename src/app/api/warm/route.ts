@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -13,7 +13,7 @@ export const preferredRegion = "iad1";
  * Ping this a couple of minutes before signups open. It is intentionally cheap
  * and unauthenticated - it reveals nothing and does no work beyond `select 1`.
  */
-export async function GET(_request: NextRequest) {
+export async function GET() {
   const startedAt = Date.now();
   try {
     await pool.query("select 1");

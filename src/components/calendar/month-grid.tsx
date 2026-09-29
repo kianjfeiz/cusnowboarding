@@ -1,5 +1,5 @@
 import { cn } from "@/components/ui";
-import type { GridDay } from "@/lib/events";
+import type { GridDay } from "@/lib/events/events";
 import { CalendarEntry } from "./item-dialog";
 import type { CalendarItemView } from "./view";
 

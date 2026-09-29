@@ -29,8 +29,8 @@ export default async function EditTripPage({
     <div className="max-w-3xl">
       <PageHeader
         title={`Edit ${trip.title}`}
-        subtitle="Price changes do not alter what existing signups owe - that amount is snapshotted at claim time."
-        back={{ href: `/admin/trips/${trip.id}`, label: "Back to roster" }}
+        subtitle="A new price applies to new signups only."
+        back={{ href: `/admin/trips/${trip.id}`, label: "Roster" }}
       />
 
       <TripForm
@@ -40,7 +40,6 @@ export default async function EditTripPage({
         defaults={{
           id: trip.id,
           title: trip.title,
-          slug: trip.slug,
           resort: trip.resort ?? "",
           description: trip.description ?? "",
           departAt: toDenverInput(trip.depart_at),
@@ -59,12 +58,12 @@ export default async function EditTripPage({
       {mayCancel || mayRestore ? (
         <section className="mt-8 rounded-lg border border-border bg-paper p-6">
           <h2 className="text-sm font-semibold text-ink">
-            {cancelled ? "This trip is cancelled" : "Calling it off"}
+            {cancelled ? "This trip is cancelled" : "Cancel this trip"}
           </h2>
           <p className="mt-1 mb-4 text-sm text-ink-muted">
             {cancelled
-              ? "Members cannot see it and nobody can claim. Restoring puts it back on the schedule with its signups and roster untouched."
-              : "Cancelling hides the trip from members and stops all claims. It does not refund or notify anyone who already paid - tell them yourself."}
+              ? "Members cannot see it. Restoring puts it back with its roster untouched."
+              : "Hides the trip from members and stops signups. Nobody is refunded or emailed - tell them yourself."}
           </p>
           <form action={setTripStatus}>
             <input type="hidden" name="tripId" value={trip.id} />

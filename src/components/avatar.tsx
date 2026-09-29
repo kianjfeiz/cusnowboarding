@@ -8,13 +8,8 @@ function initials(name: string): string {
 }
 
 /**
- * Falls back to initials rather than a placeholder image: plenty of members
- * will sign in with a Google account that has no photo, and a wall of identical
- * silhouettes reads worse than initials.
- *
- * Plain <img> rather than next/image because these are Google avatar URLs on a
- * domain we do not control, and configuring a remote loader for them is not
- * worth it at 32px.
+ * Falls back to initials: plenty of Google accounts have no photo. Plain <img>
+ * because these are Google avatar URLs on a domain we do not control.
  */
 export function Avatar({
   src,
@@ -40,10 +35,7 @@ export function Avatar({
         height={size}
         loading="lazy"
         referrerPolicy="no-referrer"
-        className={cn(
-          "shrink-0 rounded-full border border-border object-cover",
-          className,
-        )}
+        className={cn("shrink-0 rounded-full border border-border object-cover", className)}
         style={style}
       />
     );
@@ -70,45 +62,52 @@ export interface AttendeeFace {
   imageUrl: string | null;
 }
 
-/**
- * Shows who is on a trip at a glance: a few faces and a count of the rest.
- *
- * Only rendered for trips whose roster the board has finalized. Before that the
- * list churns as holds lapse and the waitlist moves, and showing it would out
- * people who are about to lose their spot.
- */
+/** A few overlapping faces. Only for a finalized roster; the caller says the count. */
 export function AvatarStack({
   people,
-  total,
   max = 3,
   size = 32,
 }: {
   people: AttendeeFace[];
-  total: number;
   max?: number;
   size?: number;
 }) {
-  const shown = people.slice(0, max);
-  const remaining = Math.max(0, total - shown.length);
-
-  if (total === 0) return null;
+  if (people.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex -space-x-2">
-        {shown.map((person) => (
-          <Avatar
-            key={person.id}
-            src={person.imageUrl}
-            name={person.name}
-            size={size}
-            className="ring-2 ring-paper"
-          />
-        ))}
-      </div>
-      {remaining > 0 ? (
-        <span className="text-xs text-ink-muted">+{remaining} more</span>
-      ) : null}
+    <div className="flex -space-x-2">
+      {people.slice(0, max).map((person) => (
+        <Avatar
+          key={person.id}
+          src={person.imageUrl}
+          name={person.name}
+          size={size}
+          className="ring-2 ring-paper"
+        />
+      ))}
     </div>
+  );
+}
+
+/** The full attendee list, shown only to people who are themselves on the trip. */
+export function AttendeeList({
+  people,
+}: {
+  people: Array<{ memberId: string; name: string; imageUrl: string | null; detail: string | null }>;
+}) {
+  return (
+    <ul className="grid gap-3 sm:grid-cols-2">
+      {people.map((person) => (
+        <li key={person.memberId} className="flex items-center gap-3">
+          <Avatar src={person.imageUrl} name={person.name} size={32} />
+          <div className="min-w-0">
+            <p className="truncate text-sm">{person.name}</p>
+            {person.detail ? (
+              <p className="tnum truncate text-xs text-ink-faint">{person.detail}</p>
+            ) : null}
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

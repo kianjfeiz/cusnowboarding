@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { auth, signIn, signOut } from "@/auth";
+import { auth, signOut } from "@/auth";
 import { Avatar } from "@/components/avatar";
 import { NavStrip, type NavItem } from "@/components/nav-strip";
 import { Wordmark } from "@/components/wordmark";
 
 /**
- * Member-facing navigation. The board has its own shell under /admin; this is
- * what everyone else sees.
+ * Member-facing navigation; the board has its own shell under /admin. Every
+ * page under this header is behind sign-in (middleware), so there is no
+ * signed-out state to render.
  */
 export async function SiteHeader() {
   const session = await auth();
@@ -16,104 +17,51 @@ export async function SiteHeader() {
     // Trip pages are reached from the Home list, so Home stays lit there.
     { href: "/", label: "Home", covers: ["/trips"], icon: "home" },
     { href: "/calendar", label: "Calendar", icon: "calendar" },
-    ...(user
-      ? [
-          {
-            href: "/me",
-            label: "My trips",
-            // All only ever reached from My trips, and the longer claims
-            // outrank Home's blanket hold on /trips.
-            covers: ["/trips/*/roster", "/trips/*/rides", "/pay"],
-            icon: "trips",
-          },
-        ]
-      : []),
-    /* The demo carries no boardUserId by design - the token must never hold one
-       - so the Board tab is offered on the demo flag instead. What it opens is
-       the read-only actor built in admin/_lib/actor.ts. */
-    ...(user?.boardUserId || user?.isDemo
-      ? [{ href: "/admin", label: "Board", icon: "admin" }]
-      : []),
+    // Every gallery lives under /photos, so the prefix match keeps the tab lit.
+    { href: "/photos", label: "Photos", icon: "photos" },
+    { href: "/sponsors", label: "Sponsors", icon: "sponsors" },
+    {
+      href: "/me",
+      label: "My trips",
+      // Only ever reached from My trips; the longer claims outrank Home's
+      // blanket hold on /trips.
+      covers: ["/trips/*/roster", "/trips/*/rides", "/pay"],
+      icon: "trips",
+    },
+    ...(user?.boardUserId ? [{ href: "/admin", label: "Board", icon: "admin" }] : []),
   ];
 
   return (
     <header className="border-b border-border bg-paper">
-      {/*
-        Three things that fit on one line on a laptop and cannot on a phone: the
-        wordmark is 140px, the four drawn tabs another 270, and the account
-        controls 100 more. Left to wrap on its own each took a row of its own,
-        and the header ate the top third of the screen.
-
-        So the phone gets a deliberate two-row header instead of an accidental
-        three-row one - identity and account together, the nav across the full
-        width below them, where it can also scroll. `order-last` is what moves
-        the strip under a block that follows it in the DOM, and the DOM order is
-        the one that should be read aloud: what this is, then where to go.
-      */}
+      {/* On a phone: identity and account on one row, the nav across the
+          full width below, where it can scroll. `order-last` moves the strip
+          without changing the DOM order a screen reader follows. */}
       <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3">
-        {/* `-my-2 py-2` buys the wordmark a finger-sized hit area without
-            adding any height to the header row. */}
+        {/* `-my-2 py-2`: a finger-sized hit area without adding header height. */}
         <Link href="/" className="-my-2 py-2 text-ink" aria-label="CU Snowboarding home">
           <Wordmark />
         </Link>
 
-        {/* Same reasoning as the board header: the strip scrolls, not the page. */}
-        <NavStrip
-          items={navItems}
-          className="order-last w-full sm:order-none sm:w-auto"
-        />
+        <NavStrip items={navItems} className="order-last w-full sm:order-none sm:w-auto" />
 
-        <div className="ml-auto flex items-center gap-3">
-          {user ? (
-            <>
-              {/* Said plainly, because a demo visitor who forgets they are in
-                  one reads an empty "My trips" as a broken page rather than as
-                  an account that was never anybody. The Board tab is already
-                  absent above: it is gated on boardUserId, which a demo
-                  session never carries. */}
-              {user.isDemo ? (
-                <span className="rounded-md border border-border px-2 py-1 text-xs text-ink-muted">
-                  Demo
-                </span>
-              ) : (
-                <Avatar
-                  src={user.image}
-                  name={user.name ?? user.email ?? "Member"}
-                  size={28}
-                />
-              )}
-              <form
-                action={async () => {
-                  "use server";
-                  await signOut({ redirectTo: "/" });
-                }}
-              >
-                <button
-                  type="submit"
-                  className="inline-flex h-9 items-center rounded-md px-2.5 text-xs text-ink-muted transition-colors hover:bg-surface hover:text-ink sm:h-7 sm:px-2"
-                >
-                  Sign out
-                </button>
-              </form>
-            </>
-          ) : (
+        {user ? (
+          <div className="ml-auto flex items-center gap-3">
+            <Avatar src={user.image} name={user.name ?? user.email ?? "Member"} size={28} />
             <form
               action={async () => {
                 "use server";
-                // Signing in also arms the claim cookie, so a member who signs
-                // in is immediately ready for the next drop.
-                await signIn("google", { redirectTo: "/api/member/arm?next=/me" });
+                await signOut({ redirectTo: "/" });
               }}
             >
               <button
                 type="submit"
-                className="inline-flex h-9 items-center rounded-md border border-border-strong px-3 text-xs font-medium transition-colors hover:bg-surface sm:h-8"
+                className="inline-flex h-9 items-center rounded-md px-2.5 text-xs text-ink-muted transition-colors hover:bg-surface hover:text-ink sm:h-7 sm:px-2"
               >
-                Sign in with Google
+                Sign out
               </button>
             </form>
-          )}
-        </div>
+          </div>
+        ) : null}
       </div>
     </header>
   );

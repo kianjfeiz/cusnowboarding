@@ -7,7 +7,7 @@ import "./globals.css";
  *
  * Until it was imported somewhere, `createEnv` never executed and every
  * production guard in it was dead code - including the one that keeps a
- * deployment without RESEND_API_KEY from printing every verification code and
+ * deployment without RESEND_API_KEY from printing every results email and its
  * pay link into the logs, and the minimum length on the secret that signs the
  * claim cookie. Do not remove this import.
  */

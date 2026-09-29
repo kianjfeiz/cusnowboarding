@@ -2,71 +2,54 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Badge, Button, Input } from "@/components/ui";
+import type { AddableMember } from "@/app/admin/_lib/queries";
+import type { RosterSaveResult } from "./roster-board";
 
 /**
- * Search the club, put someone on the trip.
+ * Search the club, put someone on the trip: the one way onto a roster for
+ * somebody who did not win a spot.
  *
- * The roster below is the list of people who won a spot; this is the one way to
- * add somebody who did not. It is a search box rather than a dropdown because
- * the club is several hundred people and the board is looking for exactly one
- * of them, whose name they already know.
- *
- * Every result stays visible, including people who are already on the trip -
- * seeing "already on the trip" next to a name is the answer to the question the
- * board was asking, and hiding the row would read as "no such member".
+ * Every result stays visible, including people already on the trip - hiding the
+ * row would read as "no such member".
  */
-
-export interface AddableResult {
-  id: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  is_club_member: boolean;
-  is_blocked: boolean;
-  signup_status: string | null;
-}
-
-export interface AddResult {
-  ok: boolean;
-  message: string;
-}
 
 /** Typing pauses this long before a query goes out. */
 const DEBOUNCE_MS = 250;
 
 const STANDING: Record<string, string> = {
-  held: "Already on the trip",
-  paid: "Already paid",
-  waitlisted: "Already waitlisted",
+  held: "On the trip",
+  paid: "On the trip",
+  waitlisted: "On the waitlist",
 };
 
 export function RosterAdd({
   tripId,
-  freeSpots,
-  notifies,
+  canWaitlist,
   search,
   add,
 }: {
   tripId: string;
-  /** Drives whether "Add to trip" is offered; the transaction re-checks it. */
-  freeSpots: number;
-  /** True once results are out, when adding someone emails them. */
-  notifies: boolean;
-  search: (tripId: string, query: string) => Promise<AddableResult[]>;
-  add: (tripId: string, memberId: string, to: "trip" | "waitlist") => Promise<AddResult>;
+  /**
+   * Whether "Add to waitlist" is offered: not while the drop can still hand out
+   * spots (the transaction refuses it then too). "Add to trip" always is -
+   * capacity is a target, so a full trip takes them past it.
+   */
+  canWaitlist: boolean;
+  search: (tripId: string, query: string) => Promise<AddableMember[]>;
+  add: (
+    tripId: string,
+    memberId: string,
+    to: "trip" | "waitlist",
+  ) => Promise<RosterSaveResult>;
 }) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<AddableResult[]>([]);
+  const [results, setResults] = useState<AddableMember[]>([]);
   const [searching, setSearching] = useState(false);
-  const [result, setResult] = useState<AddResult | null>(null);
+  const [result, setResult] = useState<RosterSaveResult | null>(null);
   const [pending, startTransition] = useTransition();
 
-  /*
-    Every search carries the query it was fired for, and a reply is dropped
-    unless it is still the current one. Without that, a slow request for "ki"
-    can land after a fast one for "kian" and repopulate the list with the
-    results of a search the board has already moved past.
-  */
+  // A reply is dropped unless it is still for the current query, or a slow
+  // request for "ki" lands after a fast one for "kian" and overwrites it.
   const latest = useRef("");
 
   useEffect(() => {
@@ -82,14 +65,10 @@ export function RosterAdd({
     setSearching(true);
     const timer = setTimeout(() => {
       search(tripId, term)
+        .catch(() => [])
         .then((rows) => {
           if (latest.current !== term) return;
           setResults(rows);
-          setSearching(false);
-        })
-        .catch(() => {
-          if (latest.current !== term) return;
-          setResults([]);
           setSearching(false);
         });
     }, DEBOUNCE_MS);
@@ -102,10 +81,8 @@ export function RosterAdd({
     startTransition(async () => {
       const outcome = await add(tripId, memberId, to);
       setResult(outcome);
+      // The roster has just changed; a stale list of Add buttons would not.
       if (outcome.ok) {
-        // The roster above has just changed underneath the box. Clearing it
-        // makes that the thing the board looks at next, rather than a stale
-        // list of buttons half of which no longer do anything.
         setQuery("");
         setResults([]);
       }
@@ -124,12 +101,6 @@ export function RosterAdd({
           autoComplete="off"
         />
       </label>
-
-      <p className="mt-2 text-xs text-ink-muted">
-        {notifies
-          ? "Results are out, so anyone added here is emailed straight away with their spot and payment deadline."
-          : "Nobody has been told anything yet, so adding someone here sends no email."}
-      </p>
 
       {result ? (
         <p
@@ -178,21 +149,22 @@ export function RosterAdd({
                           type="button"
                           variant="secondary"
                           className="h-8 px-3 text-xs"
-                          disabled={pending || freeSpots === 0}
-                          title={freeSpots === 0 ? "No spot is free" : undefined}
+                          disabled={pending}
                           onClick={() => onAdd(person.id, "trip")}
                         >
                           Add to trip
                         </Button>
-                        <Button
-                          type="button"
-                          variant="quiet"
-                          className="h-8 px-3 text-xs"
-                          disabled={pending}
-                          onClick={() => onAdd(person.id, "waitlist")}
-                        >
-                          Waitlist
-                        </Button>
+                        {canWaitlist ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="h-8 px-3 text-xs"
+                            disabled={pending}
+                            onClick={() => onAdd(person.id, "waitlist")}
+                          >
+                            Add to waitlist
+                          </Button>
+                        ) : null}
                       </>
                     )}
                   </div>

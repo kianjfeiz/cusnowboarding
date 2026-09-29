@@ -1,12 +1,12 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { claimSpot, generatePayToken } from "@/lib/claims/claim";
-import { grantBoardSeats, compBoardMembers } from "@/lib/board-seats";
+import { grantBoardSeats, compBoardMembers } from "@/lib/roster/board-seats";
 import { pool } from "@/lib/db";
-import { withTripLock } from "@/lib/promotion";
-import { releaseResults } from "@/lib/results";
-import { addMemberToTrip } from "@/lib/roster-add";
-import { applyRosterAssignment } from "@/lib/roster-edit";
-import { getOccupancy } from "@/lib/trips";
+import { withTripLock } from "@/lib/roster/promotion";
+import { releaseResults } from "@/lib/roster/results";
+import { addMemberToTrip } from "@/lib/roster/roster-add";
+import { applyRosterAssignment } from "@/lib/roster/roster-edit";
+import { getOccupancy } from "@/lib/trips/trips";
 import {
   createTestTrip,
   deleteTestTrips,
@@ -279,7 +279,7 @@ describe("compBoardMembers", () => {
     const result = await releaseResults(tripId, boardUserId);
     expect(result.ok).toBe(true);
     // Two riders emailed, not three: the board is not told about its own trips.
-    expect((result.spotEmails ?? 0) + (result.waitlistEmails ?? 0)).toBe(2);
+    expect(result.emailed).toBe(2);
 
     const board = (await getSignups(tripId)).find(
       (r) => r.member_id === boardMemberIds[0],

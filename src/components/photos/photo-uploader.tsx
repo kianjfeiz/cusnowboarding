@@ -1,20 +1,19 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, cn } from "@/components/ui";
 
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp", "image/heic"];
 const MAX_BYTES = 25 * 1024 * 1024;
 
-/**
- * Three at a time. A trip dump is thirty photos from a phone on lodge wifi;
- * firing all thirty at once makes every one of them slow and makes the progress
- * bars useless as a signal.
- */
-const CONCURRENCY = 3;
-
 type Phase = "waiting" | "uploading" | "finishing" | "done" | "error";
+
+const PHASE_LABEL: Record<Exclude<Phase, "uploading" | "error">, string> = {
+  waiting: "Queued",
+  finishing: "Finishing",
+  done: "Done",
+};
 
 interface Upload {
   id: string;
@@ -25,7 +24,7 @@ interface Upload {
 }
 
 const MESSAGES: Record<string, string> = {
-  forbidden: "Only people who were on this trip can add photos.",
+  forbidden: "This gallery is not open for photos.",
   rate_limited: "That is a lot of photos at once. Try the rest in an hour.",
   storage_unconfigured: "Photo storage is not set up yet. Tell the board.",
   too_large: "Over the 25MB limit.",
@@ -33,8 +32,10 @@ const MESSAGES: Record<string, string> = {
   missing_object: "The upload did not finish. Try again.",
 };
 
-function describe(code: string | undefined): string {
-  return (code && MESSAGES[code]) || "Upload failed. Try again.";
+/** The member-facing reason behind a non-2xx from one of the photo routes. */
+async function describeFailure(response: Response): Promise<string> {
+  const body = (await response.json().catch(() => null)) as { error?: string } | null;
+  return (body?.error && MESSAGES[body.error]) || "Upload failed. Try again.";
 }
 
 /** XHR rather than fetch, purely because it is the only one that reports upload progress. */
@@ -61,153 +62,83 @@ function putWithProgress(
   });
 }
 
-async function readDimensions(file: File): Promise<{ width: number; height: number } | null> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const dimensions = { width: bitmap.width, height: bitmap.height };
-    bitmap.close();
-    return dimensions;
-  } catch {
-    // HEIC will not decode in most browsers. Dimensions are a nicety, not a
-    // reason to refuse the photo.
-    return null;
-  }
-}
-
-export function PhotoUploader({ tripId }: { tripId: string }) {
+export function PhotoUploader({
+  subject,
+}: {
+  /** The gallery this uploads into - one trip or one event. */
+  subject: { type: "trip" | "event"; id: string };
+}) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
-  const [dragging, setDragging] = useState(false);
-  const busy = useRef(false);
 
-  const patch = useCallback((id: string, changes: Partial<Upload>) => {
+  function patch(id: string, changes: Partial<Upload>) {
     setUploads((current) =>
       current.map((item) => (item.id === id ? { ...item, ...changes } : item)),
     );
-  }, []);
+  }
 
-  const uploadOne = useCallback(
-    async (id: string, file: File) => {
-      patch(id, { phase: "uploading", progress: 0 });
+  /** Returns the reason it failed, or null once the photo is finalized. */
+  async function uploadOne(id: string, file: File): Promise<string | null> {
+    patch(id, { phase: "uploading" });
 
-      const ticket = await fetch("/api/photos/upload-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tripId,
-          contentType: file.type,
-          sizeBytes: file.size,
-          originalFilename: file.name,
-        }),
-      });
+    const ticket = await fetch("/api/photos/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        [subject.type === "trip" ? "tripId" : "eventId"]: subject.id,
+        contentType: file.type,
+        sizeBytes: file.size,
+        originalFilename: file.name,
+      }),
+    });
+    if (!ticket.ok) return describeFailure(ticket);
 
-      if (!ticket.ok) {
-        const body = (await ticket.json().catch(() => null)) as { error?: string } | null;
-        patch(id, { phase: "error", message: describe(body?.error) });
-        return;
-      }
+    const { photoId, uploadUrl } = (await ticket.json()) as { photoId: string; uploadUrl: string };
+    await putWithProgress(uploadUrl, file, (fraction) =>
+      patch(id, { progress: Math.round(fraction * 100) }),
+    );
 
-      const { photoId, uploadUrl } = (await ticket.json()) as {
-        photoId: string;
-        uploadUrl: string;
-      };
+    patch(id, { phase: "finishing", progress: 100 });
+    const finalized = await fetch(`/api/photos/${photoId}/finalize`, { method: "POST" });
+    return finalized.ok ? null : describeFailure(finalized);
+  }
 
-      try {
-        await putWithProgress(uploadUrl, file, (fraction) =>
-          patch(id, { progress: Math.round(fraction * 100) }),
-        );
-      } catch {
-        patch(id, { phase: "error", message: "Upload failed. Try again." });
-        return;
-      }
+  async function accept(fileList: FileList | null) {
+    const files = Array.from(fileList ?? []);
+    if (files.length === 0) return;
 
-      patch(id, { phase: "finishing", progress: 100 });
+    const queue = files.map((file, index) => {
+      const problem = !ACCEPTED.includes(file.type)
+        ? MESSAGES.unsupported_type
+        : file.size > MAX_BYTES
+          ? MESSAGES.too_large
+          : undefined;
+      return { id: `${index}-${file.name}`, file, problem };
+    });
 
-      const dimensions = await readDimensions(file);
-      const finalized = await fetch(`/api/photos/${photoId}/finalize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(dimensions ?? {}),
-      });
+    setUploads(
+      queue.map(({ id, file, problem }) => ({
+        id,
+        name: file.name,
+        progress: 0,
+        phase: problem ? "error" : "waiting",
+        message: problem,
+      })),
+    );
 
-      if (!finalized.ok) {
-        const body = (await finalized.json().catch(() => null)) as { error?: string } | null;
-        patch(id, { phase: "error", message: describe(body?.error) });
-        return;
-      }
+    // One at a time: on lodge wifi, parallel uploads make every one of them
+    // slow and the progress bars useless as a signal.
+    for (const { id, file, problem } of queue) {
+      if (problem) continue;
+      const failure = await uploadOne(id, file).catch(() => "Upload failed. Try again.");
+      patch(id, failure ? { phase: "error", message: failure } : { phase: "done" });
+    }
 
-      patch(id, { phase: "done" });
-    },
-    [patch, tripId],
-  );
-
-  const accept = useCallback(
-    async (fileList: FileList | null) => {
-      if (!fileList || fileList.length === 0 || busy.current) return;
-
-      const files = Array.from(fileList);
-      const queued: Array<{ id: string; file: File }> = [];
-      const rejected: Upload[] = [];
-
-      for (const file of files) {
-        const id = `${file.name}-${file.size}-${file.lastModified}-${Math.random()}`;
-        if (!ACCEPTED.includes(file.type)) {
-          rejected.push({
-            id,
-            name: file.name,
-            progress: 0,
-            phase: "error",
-            message: MESSAGES.unsupported_type,
-          });
-        } else if (file.size > MAX_BYTES) {
-          rejected.push({
-            id,
-            name: file.name,
-            progress: 0,
-            phase: "error",
-            message: MESSAGES.too_large,
-          });
-        } else {
-          queued.push({ id, file });
-        }
-      }
-
-      setUploads([
-        ...rejected,
-        ...queued.map(({ id, file }) => ({
-          id,
-          name: file.name,
-          progress: 0,
-          phase: "waiting" as Phase,
-        })),
-      ]);
-
-      if (queued.length === 0) return;
-
-      busy.current = true;
-      let cursor = 0;
-      const workers = Array.from(
-        { length: Math.min(CONCURRENCY, queued.length) },
-        async () => {
-          while (cursor < queued.length) {
-            const next = queued[cursor++];
-            await uploadOne(next.id, next.file);
-          }
-        },
-      );
-
-      try {
-        await Promise.all(workers);
-      } finally {
-        busy.current = false;
-        if (inputRef.current) inputRef.current.value = "";
-        // New photos need freshly signed URLs, which only the server can mint.
-        router.refresh();
-      }
-    },
-    [router, uploadOne],
-  );
+    if (inputRef.current) inputRef.current.value = "";
+    // New photos need freshly signed URLs, which only the server can mint.
+    router.refresh();
+  }
 
   const pending = uploads.filter((u) => u.phase !== "done" && u.phase !== "error").length;
   const failed = uploads.filter((u) => u.phase === "error").length;
@@ -215,43 +146,24 @@ export function PhotoUploader({ tripId }: { tripId: string }) {
 
   return (
     <div className="space-y-3">
-      <div
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragging(false);
-          void accept(event.dataTransfer.files);
-        }}
-        className={cn(
-          "rounded-lg border border-dashed p-8 text-center transition-colors",
-          dragging ? "border-accent bg-accent-soft" : "border-border-strong bg-surface",
-        )}
-      >
-        <p className="text-sm text-ink">Drop photos here, or choose them.</p>
-        <p className="mt-1 text-xs text-ink-muted">
-          JPEG, PNG, WebP, or HEIC. Up to 25MB each.
-        </p>
-
+      <div className="rounded-lg border border-dashed border-border-strong bg-surface p-6 text-center">
         <input
           ref={inputRef}
           type="file"
           multiple
           accept={ACCEPTED.join(",")}
           className="sr-only"
+          disabled={pending > 0}
           onChange={(event) => void accept(event.target.files)}
         />
         <Button
           variant="secondary"
-          className="mt-4"
           disabled={pending > 0}
           onClick={() => inputRef.current?.click()}
         >
-          {pending > 0 ? `Uploading ${pending}...` : "Choose photos"}
+          {pending > 0 ? `Uploading ${pending}...` : "Upload photos"}
         </Button>
+        <p className="mt-2 text-xs text-ink-muted">JPEG, PNG, WebP, or HEIC, up to 25MB each.</p>
       </div>
 
       {uploads.length > 0 ? (
@@ -273,13 +185,9 @@ export function PhotoUploader({ tripId }: { tripId: string }) {
                   >
                     {upload.phase === "error"
                       ? upload.message
-                      : upload.phase === "done"
-                        ? "Done"
-                        : upload.phase === "finishing"
-                          ? "Finishing"
-                          : upload.phase === "waiting"
-                            ? "Queued"
-                            : `${upload.progress}%`}
+                      : upload.phase === "uploading"
+                        ? `${upload.progress}%`
+                        : PHASE_LABEL[upload.phase]}
                   </span>
                 </div>
                 <div className="mt-1 h-1 w-full overflow-hidden rounded bg-surface-strong">
@@ -289,7 +197,7 @@ export function PhotoUploader({ tripId }: { tripId: string }) {
                       upload.phase === "error" ? "bg-alert" : "bg-accent",
                     )}
                     style={{
-                      width: `${upload.phase === "error" ? 100 : upload.phase === "done" ? 100 : upload.progress}%`,
+                      width: `${upload.phase === "error" || upload.phase === "done" ? 100 : upload.progress}%`,
                     }}
                   />
                 </div>

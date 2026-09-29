@@ -62,56 +62,24 @@ body {
   color: var(--ink);
 }
 
-/*
- * Motion. One easing and one entrance, shared by everything, so the whole site
- * moves like one thing instead of a pile of components each with an opinion.
- *
- * The rules: motion marks arrival, hover, or a state change - it never loops
- * for decoration (the only repeating animation anywhere is the live-status
- * dot, which is information). Everything is under half a second, and all of it
- * collapses under prefers-reduced-motion.
- */
-:root {
-  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+/* The fade tells the eye a dialog opened over the page rather than replaced it. */
+dialog[open],
+dialog::backdrop,
+:popover-open,
+:popover-open::backdrop {
+  animation: fade-in 0.15s ease both;
 }
-
-@keyframes rise-in {
+@keyframes fade-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* Stagger with `style={{ "--rise-delay": "90ms" }}` on the element. */
-.rise {
-  animation: rise-in 0.45s var(--ease-soft) both;
-  animation-delay: var(--rise-delay, 0ms);
-}
-
-/* The calendar panel and any other native dialog get the same arrival. */
-dialog[open] {
-  animation: rise-in 0.25s var(--ease-soft) both;
-}
-dialog::backdrop {
-  animation: backdrop-in 0.25s ease both;
-}
-@keyframes backdrop-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise,
   dialog[open],
-  dialog::backdrop {
+  dialog::backdrop,
+  :popover-open,
+  :popover-open::backdrop {
     animation: none;
   }
 }
@@ -127,166 +95,138 @@ dialog::backdrop {
 }
 
 /*
- * The sliding nav indicator is the one element that is not a flat fill: it has
- * to read as a lens of glass resting on the header. Three layers sell it -
- * a translucent body that grades darker through the middle the way light falls
- * off inside curved glass, an inset shadow stack acting as rim light (bright
- * across the top where the light hits, faint along the sides and bottom where
- * it wraps), and a `::before` specular sheen across the upper half. Kept here
- * rather than in class strings because every layer changes with the colour
- * scheme. The blur itself rides on Tailwind's `backdrop-*` utilities in
- * NavStrip; a plain `backdrop-filter` declaration here does not survive the
- * CSS build.
+ * A Photos folder (src/components/photos/folder-card.tsx). Geometry lives here
+ * with the motion because the two are tuned against each other: the front
+ * panel's top edge sits below the sheets' tops so a sliver of paper shows when
+ * closed, and the sheets rise past the back panel when it opens.
  */
-.nav-glass {
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--paper) 40%, transparent),
-    color-mix(in srgb, var(--surface-strong) 52%, transparent) 55%,
-    color-mix(in srgb, var(--surface) 34%, transparent)
-  );
-  border: 1px solid color-mix(in srgb, var(--border-strong) 40%, transparent);
-  box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.9),
-    inset 0 -1px 1px rgba(255, 255, 255, 0.3),
-    inset 2px 0 2px -1px rgba(255, 255, 255, 0.45),
-    inset -2px 0 2px -1px rgba(255, 255, 255, 0.45),
-    0 1px 2px rgba(0, 0, 0, 0.07),
-    0 6px 14px -6px rgba(0, 0, 0, 0.16);
+.folder-art {
+  --folder-back: var(--surface-strong);
+  --folder-front: var(--surface);
+  /* Seen from above, so the flap drops as it opens; from level it would appear to grow. */
+  perspective: 1400px;
+  perspective-origin: 50% 0%;
 }
 
-.nav-glass::before {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  border-radius: inherit;
-  background: linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.55),
-    rgba(255, 255, 255, 0.08) 42%,
-    rgba(255, 255, 255, 0) 60%
-  );
-}
-
+/* The front stays the lighter panel in both schemes, so it reads as nearer. */
 @media (prefers-color-scheme: dark) {
-  /* On dark paper the frost has to lighten rather than tint - glass over a
-     dark surface catches light, so the body is built from white at low alpha
-     instead of the surface colours. */
-  .nav-glass {
-    background: linear-gradient(
-      to bottom,
-      rgba(255, 255, 255, 0.13),
-      rgba(255, 255, 255, 0.05) 55%,
-      rgba(255, 255, 255, 0.09)
-    );
-    border-color: rgba(255, 255, 255, 0.14);
-    box-shadow:
-      inset 0 1px 1px rgba(255, 255, 255, 0.16),
-      inset 0 -1px 1px rgba(255, 255, 255, 0.05),
-      inset 2px 0 2px -1px rgba(255, 255, 255, 0.08),
-      inset -2px 0 2px -1px rgba(255, 255, 255, 0.08),
-      0 1px 2px rgba(0, 0, 0, 0.45),
-      0 6px 14px -6px rgba(0, 0, 0, 0.6);
+  .folder-art {
+    --folder-back: var(--surface);
+    --folder-front: var(--surface-strong);
+  }
+}
+
+.folder-back {
+  fill: var(--folder-back);
+  stroke: var(--border-strong);
+  stroke-width: 1px;
+}
+
+.folder-sheet {
+  position: absolute;
+  bottom: 6%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--paper);
+}
+
+.folder-sheet-back {
+  top: 14%;
+  left: 9%;
+  right: 9%;
+}
+
+.folder-sheet-front {
+  top: 18.5%;
+  left: 5%;
+  right: 14%;
+  padding: 5px;
+}
+
+.folder-print {
+  height: 100%;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--accent-soft);
+}
+
+.folder-print svg {
+  display: block;
+  width: 100%;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.folder-front {
+  position: absolute;
+  inset: 26% 0 0 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 1.25rem;
+  border: 1px solid var(--border-strong);
+  /* The back panel's 16-unit corners in its 400x300 box, so the two agree at any size. */
+  border-radius: 4% / 7.2%;
+  background: var(--folder-front);
+  transform-origin: 50% 100%;
+}
+
+/*
+ * Opening: the owner's deliberate exception to "motion is nearly absent". The
+ * front folds down on its bottom hinge and the sheets rise, transform only, so
+ * nothing around the card reflows. A closed flap carries no transform at all:
+ * even an identity rotateX puts it on a 3D layer and softens its text.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .folder-front,
+  .folder-sheet {
+    transition: transform 360ms cubic-bezier(0.25, 1, 0.5, 1);
   }
 
-  .nav-glass::before {
-    background: linear-gradient(
-      to bottom,
-      rgba(255, 255, 255, 0.12),
-      rgba(255, 255, 255, 0.02) 42%,
-      rgba(255, 255, 255, 0) 60%
-    );
+  .folder:focus-visible .folder-front {
+    transform: rotateX(-32deg);
+  }
+  .folder:focus-visible .folder-sheet-back {
+    transform: translateY(-9%);
+  }
+  .folder:focus-visible .folder-sheet-front {
+    transform: translateY(-6%);
+  }
+}
+
+/* A touch screen keeps :hover after a tap, which would leave a folder open. */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .folder:hover .folder-front {
+    transform: rotateX(-32deg);
+  }
+  .folder:hover .folder-sheet-back {
+    transform: translateY(-9%);
+  }
+  .folder:hover .folder-sheet-front {
+    transform: translateY(-6%);
+  }
+}
+
+/* Reduced motion: the folder stays shut and answers with a fill change instead. */
+@media (prefers-reduced-motion: reduce) {
+  .folder-front {
+    transition: background-color 150ms ease;
+  }
+  .folder:hover .folder-front,
+  .folder:focus-visible .folder-front {
+    background: var(--folder-back);
   }
 }
 
 /*
- * The sign-in card. Same three-layer light model as .nav-glass rather than a
- * second glass language on the site: translucent body grading through the
- * middle, an inset stack standing in for rim light, and a specular sheen over
- * the upper half. Only the geometry differs - a panel is wide and tall where
- * the indicator is a small lens, so the sheen falls off sooner and the drop
- * shadow reaches further.
- *
- * This is the one place the "no gradients as decoration" rule bends, and it
- * bends the same way and for the same reason it already does in the header.
- */
-.glass-panel {
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--paper) 62%, transparent),
-    color-mix(in srgb, var(--surface-strong) 46%, transparent) 48%,
-    color-mix(in srgb, var(--surface) 40%, transparent)
-  );
-  border: 1px solid color-mix(in srgb, var(--border-strong) 45%, transparent);
-  box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.9),
-    inset 0 -1px 1px rgba(255, 255, 255, 0.28),
-    inset 2px 0 3px -2px rgba(255, 255, 255, 0.5),
-    inset -2px 0 3px -2px rgba(255, 255, 255, 0.5),
-    0 1px 2px rgba(0, 0, 0, 0.06),
-    0 24px 48px -24px rgba(0, 0, 0, 0.22);
-}
-
-.glass-panel::before {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    rgba(255, 255, 255, 0.5),
-    rgba(255, 255, 255, 0.06) 30%,
-    rgba(255, 255, 255, 0) 46%
-  );
-}
-
-@media (prefers-color-scheme: dark) {
-  /* Same inversion as the nav: over dark paper the frost is built from white
-     at low alpha, because glass on a dark ground catches light rather than
-     tinting what is behind it. */
-  .glass-panel {
-    background: linear-gradient(
-      to bottom,
-      rgba(255, 255, 255, 0.1),
-      rgba(255, 255, 255, 0.035) 48%,
-      rgba(255, 255, 255, 0.06)
-    );
-    border-color: rgba(255, 255, 255, 0.12);
-    box-shadow:
-      inset 0 1px 1px rgba(255, 255, 255, 0.14),
-      inset 0 -1px 1px rgba(255, 255, 255, 0.04),
-      inset 2px 0 3px -2px rgba(255, 255, 255, 0.07),
-      inset -2px 0 3px -2px rgba(255, 255, 255, 0.07),
-      0 1px 2px rgba(0, 0, 0, 0.5),
-      0 24px 48px -24px rgba(0, 0, 0, 0.75);
-  }
-
-  .glass-panel::before {
-    background: linear-gradient(
-      to bottom,
-      rgba(255, 255, 255, 0.1),
-      rgba(255, 255, 255, 0.015) 30%,
-      rgba(255, 255, 255, 0) 46%
-    );
-  }
-}
-
-/*
- * iOS Safari zooms the whole page in when a focused control's text is smaller
- * than 16px, and does not zoom back out. On a drop night that is the difference
- * between typing the phrase and fighting the viewport, so every control is
- * given 16px on phones regardless of the Tailwind size class it carries.
- *
- * The min-height is the same argument for the finger rather than the eye: the
- * admin forms are laid out at `h-8` for a desktop where thirty rows are on
- * screen at once, which is well under a comfortable tap target.
- *
- * One rule rather than editing each class string: it catches controls added
- * later, and the desktop sizing above the breakpoint is left exactly as
- * designed. 640px is Tailwind's `sm`. Checkboxes and radios are excluded
- * because their box is the control - stretching it would just misalign it from
- * its label.
+ * iOS Safari zooms the page when a focused control's text is under 16px and
+ * does not zoom back out - on drop night, that is fighting the viewport instead
+ * of typing the phrase. The min-height is the same argument for the finger:
+ * admin forms are laid out at `h-8` for desktop. Below Tailwind's `sm`.
+ * Checkboxes and radios are excluded because their box is the control.
  */
 @media (max-width: 639px) {
   input,
