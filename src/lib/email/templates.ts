@@ -52,6 +52,15 @@ export interface ResultRecipient {
 export function resultEmail(row: ResultRecipient): EmailMessage {
   const statusPage = `${baseUrl()}/pay/${row.pay_token}`;
 
+  if (row.amount_cents === 0) {
+    return message(row.email, row.first_name, `You are on ${row.trip_title}`, [
+      `The roster for ${row.trip_title} is out, and you are on the trip. There`,
+      "is no payment for this trip, so there is nothing more to do.",
+      "",
+      `Your status page: ${statusPage}`,
+    ]);
+  }
+
   // Marked paid before release. Demanding money by a deadline here would read
   // as the club having lost their payment.
   if (row.status === "paid") {

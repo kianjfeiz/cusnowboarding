@@ -214,6 +214,11 @@ export function formatMoney(cents: number): string {
   return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
+/** A trip's price as members read it: a free trip says so rather than "$0.00". */
+export function formatPrice(cents: number): string {
+  return cents === 0 ? "Free" : formatMoney(cents);
+}
+
 const DENVER = "America/Denver";
 
 /** All club-facing times are Mountain, because the trips are. */

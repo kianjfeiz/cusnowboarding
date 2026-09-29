@@ -68,8 +68,10 @@ export function StandingNotice({
       return (
         <Notice title="Entry received">
           The board releases the roster soon after signups close. If you get a
-          spot, you get an email; either way it shows here. Nothing to pay until
-          then.
+          spot, you get an email; either way it shows here.{" "}
+          {signup.amountCents === 0
+            ? "There is no payment for this trip."
+            : "Nothing to pay until then."}
         </Notice>
       );
 
@@ -83,6 +85,13 @@ export function StandingNotice({
       );
 
     case "paid":
+      if (signup.amountCents === 0) {
+        return (
+          <Notice tone="accent" title="You are on the trip">
+            No payment required. Nothing more to do.
+          </Notice>
+        );
+      }
       return (
         <Notice tone="accent" title="You are on the trip">
           <p>
@@ -98,8 +107,9 @@ export function StandingNotice({
     case "waitlisted":
       return (
         <Notice title="You are on the waitlist">
-          Nothing to pay. If the board moves you onto the trip, it shows here with
-          the amount and deadline. There is no email for that, so check back.
+          Nothing to pay. If the board moves you onto the trip, it shows here
+          {signup.amountCents === 0 ? "" : " with the amount and deadline"}. There is
+          no email for that, so check back.
         </Notice>
       );
 

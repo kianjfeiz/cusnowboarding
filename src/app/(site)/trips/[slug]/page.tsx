@@ -104,12 +104,20 @@ export default async function TripPage({ params }: { params: Promise<{ slug: str
           {trip.returnAt ? <Detail label="Returns">{formatDenver(trip.returnAt)}</Detail> : null}
           {trip.resort ? <Detail label="Resort">{trip.resort}</Detail> : null}
           <Detail label="Cost">
-            <span className="font-medium">{formatMoney(trip.priceCents)}</span>, paid on Fusion
+            {trip.priceCents === 0 ? (
+              <span className="font-medium">Free</span>
+            ) : (
+              <>
+                <span className="font-medium">{formatMoney(trip.priceCents)}</span>, paid on Fusion
+              </>
+            )}
           </Detail>
           {beforeOpen ? (
             <Detail label="Signups open">{formatDenver(trip.signupOpensAt)}</Detail>
           ) : null}
-          {released ? null : (
+          {trip.priceCents === 0 ? (
+            <Detail label="Payment">No payment required</Detail>
+          ) : released ? null : (
             <Detail label="Payment">
               Due within {trip.paymentWindowHours} hours of the roster release
             </Detail>

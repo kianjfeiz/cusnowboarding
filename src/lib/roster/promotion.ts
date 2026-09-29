@@ -34,6 +34,11 @@ export interface LockedTrip {
  *
  * `trip` is null when the trip does not exist. As with any `transaction`, a
  * result of `{ ok: false }` rolls back.
+ *
+ * Free riders are settled on both sides of `work`: before, so the expiry job
+ * never drops someone for not paying nothing, and after, so whoever `work`
+ * just put on the trip - or everyone, when `work` is the release - is settled
+ * in the same transaction.
  */
 export async function withTripLock<T>(
   tripId: string,
@@ -46,8 +51,31 @@ export async function withTripLock<T>(
          from trips where id = $1 for update`,
       [tripId],
     );
-    return work(client, rows[0] ?? null);
+    await settleFreeRiders(client, tripId);
+    const result = await work(client, rows[0] ?? null);
+    await settleFreeRiders(client, tripId);
+    return result;
   });
+}
+
+/**
+ * A rider owing nothing is on the trip, not held. Left held, the expiry job
+ * would drop them when a deadline for $0 passed, and the attendee list and ride
+ * sheet (paid riders only) would shut them out. Before release they stay held
+ * like every other entrant, because nobody has been told anything yet.
+ */
+async function settleFreeRiders(client: PoolClient, tripId: string): Promise<void> {
+  await client.query(
+    `update signups s
+        set status = 'paid', paid_at = now(), updated_at = now()
+       from trips t
+      where t.id = s.trip_id
+        and s.trip_id = $1
+        and s.status = 'held'
+        and s.amount_cents = 0
+        and t.results_released_at is not null`,
+    [tripId],
+  );
 }
 
 /** The audit row, written on the caller's transaction so it commits with the change. */

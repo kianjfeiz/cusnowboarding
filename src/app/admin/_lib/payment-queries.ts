@@ -156,6 +156,9 @@ export function paidVia(row: PaymentLine): { label: string; note: string | null 
     return { label: PAYMENT_PROVIDER_LABELS[provider], note: detail };
   }
   if (row.paid_offline) return { label: "Recorded by hand", note: row.offline_note };
+  if (row.signup_status === "paid" && row.amount_cents === 0) {
+    return { label: "Free trip", note: null };
+  }
   if (row.signup_status === "paid") return { label: "Source not recorded", note: null };
   return { label: "-", note: null };
 }

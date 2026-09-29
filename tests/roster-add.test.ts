@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { claimSpot, generatePayToken } from "@/lib/claims/claim";
 import { pool } from "@/lib/db";
+import { promoteFromWaitlist } from "@/lib/roster/promotion";
 import { releaseResults } from "@/lib/roster/results";
 import { addMemberToTrip } from "@/lib/roster/roster-add";
 import { createTestTrip, deleteTestTrips, getMemberIds, getSignups, setupPool } from "./helpers";
@@ -151,6 +152,58 @@ describe("releaseResults", () => {
     const after = await tripRow(tripId);
     expect(after.status).toBe("cancelled");
     expect(after.results_released_at).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Free trips
+// ---------------------------------------------------------------------------
+
+describe("a free trip", () => {
+  async function states(tripId: string) {
+    const { rows } = await setupPool.query<{ id: string; status: string }>(
+      `select id, status::text as status from signups
+        where trip_id = $1 and not board_seat order by claim_seq`,
+      [tripId],
+    );
+    return rows;
+  }
+
+  test("settles its riders at release and leaves the waitlist alone", async () => {
+    const tripId = await createTestTrip({ capacity: 2, priceCents: 0, resultsReleased: false });
+    await fill(tripId, 3);
+
+    // Held like any entrant until the roster is out.
+    expect((await states(tripId)).map((r) => r.status)).toContain("held");
+
+    expect((await releaseResults(tripId, boardUserId)).ok).toBe(true);
+
+    // A hold on a free trip would lapse over $0 and keep the rider off the
+    // attendee list, which is paid riders only.
+    const after = (await states(tripId)).map((r) => r.status);
+    expect(after).not.toContain("held");
+    expect(after.filter((s) => s === "waitlisted")).toHaveLength(1);
+  });
+
+  test("settles a rider moved up after release", async () => {
+    const tripId = await createTestTrip({ capacity: 2, priceCents: 0, resultsReleased: false });
+    await fill(tripId, 3);
+    await releaseResults(tripId, boardUserId);
+
+    const rows = await states(tripId);
+    const onTrip = rows.find((r) => r.status === "paid")!;
+    const waiting = rows.find((r) => r.status === "waitlisted")!;
+    await setupPool.query(
+      `update signups set status = 'expired', spot_number = null, released_at = now(),
+              release_reason = 'board_release'
+        where id = $1`,
+      [onTrip.id],
+    );
+
+    expect((await promoteFromWaitlist(waiting.id, boardUserId)).ok).toBe(true);
+
+    const promoted = (await states(tripId)).find((r) => r.id === waiting.id)!;
+    expect(promoted.status).toBe("paid");
   });
 });
 

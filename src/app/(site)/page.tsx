@@ -1,7 +1,15 @@
 import Link from "next/link";
 import { auth } from "@/auth";
 import { listUpcomingTrips } from "@/lib/trips/trips";
-import { Badge, Card, DAY_ONLY, SectionHeading, formatDenver, formatMoney } from "@/components/ui";
+import {
+  Badge,
+  Card,
+  DAY_ONLY,
+  SectionHeading,
+  formatDenver,
+  formatMoney,
+  formatPrice,
+} from "@/components/ui";
 import { CountdownChip } from "@/components/countdown-chip";
 import { UpcomingList } from "@/components/calendar/upcoming-list";
 import { UPCOMING_WEEKS, toCalendarItemViews } from "@/components/calendar/view";
@@ -130,7 +138,7 @@ export default async function Home() {
             <p className="mt-2 text-sm text-ink-muted">
               {formatDenver(heroTrip.departAt, DAY_ONLY)}
               {heroTrip.resort ? ` · ${heroTrip.resort}` : ""} ·{" "}
-              {formatMoney(heroTrip.priceCents)} · {heroTrip.capacity} spots
+              {formatPrice(heroTrip.priceCents)} · {heroTrip.capacity} spots
             </p>
 
             <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
@@ -184,7 +192,7 @@ export default async function Home() {
                       <p className="font-medium text-ink">{trip.title}</p>
                       <p className="mt-0.5 text-sm text-ink-muted">
                         {formatDenver(trip.departAt, DAY_ONLY)}
-                        {trip.resort ? ` · ${trip.resort}` : ""} · {formatMoney(trip.priceCents)}
+                        {trip.resort ? ` · ${trip.resort}` : ""} · {formatPrice(trip.priceCents)}
                       </p>
                       {standing ? null : (
                         <p className="mt-2 flex items-center gap-2 text-sm">
