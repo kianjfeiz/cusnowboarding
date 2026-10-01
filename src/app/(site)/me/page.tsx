@@ -4,12 +4,19 @@ import type { ReactNode } from "react";
 import { auth } from "@/auth";
 import { Badge, Card, DAY_ONLY, SectionHeading, formatDenver } from "@/components/ui";
 import { listMemberTrips, type MemberTrip } from "@/lib/trips/attendees";
-import { standingOf } from "@/lib/roster/standing";
+import { standingOf, type Standing } from "@/lib/roster/standing";
 import { DrawnTitle } from "@/components/drawn-title";
 import { STANDING_LABEL, StandingNotice } from "../signup-status";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "My trips - CU Snowboarding" };
+
+/**
+ * Only trips the member is actually on: a board seat, or a spot once the roster
+ * is out, paid or not yet. An entry before release, the waitlist and anyone
+ * taken off stay on the trip page, which still says where they stand.
+ */
+const ON_TRIP: ReadonlySet<Standing> = new Set(["board", "paid", "due"]);
 
 /** Day only: which weekend it is. The departure time is the trip page's job. */
 function tripDates(trip: MemberTrip): string {
@@ -34,7 +41,9 @@ function CardAction({ href, children }: { href: string; children: ReactNode }) {
 export default async function MyTripsPage() {
   const session = await auth();
   const memberId = session?.user?.memberId;
-  const trips = memberId ? await listMemberTrips(memberId) : [];
+  const trips = (memberId ? await listMemberTrips(memberId) : []).filter((trip) =>
+    ON_TRIP.has(standingOf(trip)),
+  );
 
   // "Past" is decided by the return date rather than by status: a trip you paid
   // for is still upcoming until it actually happens.
@@ -80,11 +89,6 @@ export default async function MyTripsPage() {
 function TripCard({ trip, past }: { trip: MemberTrip; past: boolean }) {
   const standing = standingOf(trip);
   const going = standing === "board" || standing === "paid";
-  const emphasis = going
-    ? "strong"
-    : standing === "pending" || standing === "waitlisted"
-      ? "muted"
-      : "normal";
 
   // The roster and the ride sheet are readable only by riders marked paid, so
   // nobody else is offered a link that ends at a locked page.
@@ -105,10 +109,10 @@ function TripCard({ trip, past }: { trip: MemberTrip; past: boolean }) {
             {trip.resort ? ` · ${trip.resort}` : ""}
           </p>
         </div>
-        <Badge emphasis={emphasis}>{STANDING_LABEL[standing]}</Badge>
+        <Badge emphasis={going ? "strong" : "normal"}>{STANDING_LABEL[standing]}</Badge>
       </div>
 
-      {!past && (standing === "due" || standing === "lapsed") ? (
+      {!past && standing === "due" ? (
         <div className="mt-4">
           <StandingNotice standing={standing} signup={trip} />
         </div>

@@ -221,12 +221,12 @@ function ClaimResult({ outcome }: { outcome: Outcome }) {
   if (outcome === "received") {
     return (
       <Notice tone="accent" title="Entry received">
-        If you get a spot, you get an email when the board releases the roster.
-        Either way it shows on{" "}
+        If you get a spot, you get an email when the board releases the roster, and the
+        trip moves to{" "}
         <a className="font-medium text-accent underline underline-offset-4" href="/me">
           My trips
-        </a>{" "}
-        too.
+        </a>
+        . Either way, this page shows where you stand.
       </Notice>
     );
   }
