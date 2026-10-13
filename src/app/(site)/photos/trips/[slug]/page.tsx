@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import { after } from "next/server";
 import type { Metadata } from "next";
@@ -14,8 +15,11 @@ export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ slug: string }> };
 
+/** The metadata and the page both need the trip; one query serves both. */
+const loadTrip = cache(getGalleryTripBySlug);
+
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
-  const trip = await getGalleryTripBySlug((await params).slug);
+  const trip = await loadTrip((await params).slug);
   return {
     title: trip ? `Photos - ${trip.title}` : "Gallery not found",
     robots: { index: false, follow: false },
@@ -24,14 +28,14 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
 /** One trip's gallery. Club-wide: any signed-in member may view and upload. */
 export default async function GalleryPage({ params }: Params) {
-  const trip = await getGalleryTripBySlug((await params).slug);
+  // Independent lookups, so neither waits on the other's round trip.
+  const [trip, viewer] = await Promise.all([loadTrip((await params).slug), resolvePhotoViewer()]);
   if (!trip) notFound();
 
-  const viewer = await resolvePhotoViewer();
   const photos = canUsePhotos(viewer) ? await listPhotos(trip.id, viewer) : null;
 
-  // Photos from before thumbnails existed get theirs a few per view, after the
-  // page has gone out; until then the grid falls back to the original.
+  // Photos from before thumbnails existed get theirs after the page has gone
+  // out; until then the grid falls back to the original.
   const missing = photos?.filter((photo) => !photo.thumbUrl).map((photo) => photo.id) ?? [];
   if (missing.length > 0) after(() => generateThumbnails(missing));
 

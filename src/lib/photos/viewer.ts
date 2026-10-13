@@ -14,19 +14,19 @@ import { ANONYMOUS_VIEWER, type PhotoViewer } from "@/lib/photos/photos";
  * leaves the board.
  */
 export async function resolvePhotoViewer(): Promise<PhotoViewer> {
-  const cookieSession = await getMemberSession();
-  const cookieMember = cookieSession
-    ? await loadVerifiedMember(cookieSession.memberId, cookieSession.tokenVersion)
-    : null;
-
-  let email: string | null = null;
-  try {
-    const session = await auth();
-    email = session?.user?.email ?? null;
-  } catch {
-    // A misconfigured NextAuth setup must leave the cookie path working, not
-    // 500 the gallery.
-  }
+  // The cookie member and the session email are independent; resolve both at once.
+  const [cookieMember, email] = await Promise.all([
+    getMemberSession().then((cookieSession) =>
+      cookieSession
+        ? loadVerifiedMember(cookieSession.memberId, cookieSession.tokenVersion)
+        : null,
+    ),
+    auth()
+      .then((session) => session?.user?.email ?? null)
+      // A misconfigured NextAuth setup must leave the cookie path working, not
+      // 500 the gallery.
+      .catch(() => null),
+  ]);
 
   if (!email) {
     return cookieMember

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import {
@@ -10,15 +11,16 @@ import {
 /**
  * Resolves the signed-in board member from the database, not from the JWT: the
  * token is valid for hours, and removing someone or reassigning a role has to
- * take effect on their next request.
+ * take effect on their next request. Cached per request only - the layout,
+ * the page and an action share one read, and the next request reads afresh.
  */
-export async function currentActor(): Promise<Actor | null> {
+export const currentActor = cache(async (): Promise<Actor | null> => {
   const session = await auth();
   const email = session?.user?.email;
   if (!email) return null;
 
   return loadBoardIdentity(email);
-}
+});
 
 export async function requireActor(): Promise<Actor> {
   const actor = await currentActor();
