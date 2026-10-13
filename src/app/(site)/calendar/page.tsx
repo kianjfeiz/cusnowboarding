@@ -83,6 +83,9 @@ export default async function CalendarPage({
                 <Link
                   key={link.label}
                   href={link.href}
+                  // Only ?m= changes, so no loading boundary can show; a full
+                  // prefetch makes the month swap instant instead.
+                  prefetch
                   className="inline-flex h-10 items-center rounded-md border border-border px-3 text-ink-muted transition-colors hover:bg-surface hover:text-ink sm:h-8 sm:px-2.5"
                 >
                   {link.label}

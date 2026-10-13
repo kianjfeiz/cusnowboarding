@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { inkMask } from "@/components/ui";
@@ -60,7 +61,13 @@ export function NavStrip({
   const pathname = usePathname() ?? "/";
   const strengths = items.map((item) => claimStrength(pathname, item));
   const strongest = Math.max(-1, ...strengths);
-  const activeIndex = strongest < 0 ? -1 : strengths.indexOf(strongest);
+  const routeIndex = strongest < 0 ? -1 : strengths.indexOf(strongest);
+
+  // The tapped tab takes the fill at once rather than when the next page
+  // commits, so a slow server never makes a tap look ignored.
+  const [tapped, setTapped] = useState<number | null>(null);
+  useEffect(() => setTapped(null), [pathname]);
+  const activeIndex = tapped ?? routeIndex;
 
   // An icon makes each tab nearly square, where `rounded-full` would turn the
   // fill into a circle that changes shape with every label's width.
@@ -77,7 +84,13 @@ export function NavStrip({
             <Link
               key={item.href}
               href={item.href}
-              aria-current={active ? "page" : undefined}
+              onClick={(event) => {
+                // A modified click opens a new tab and leaves this page put.
+                if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+                  setTapped(index);
+                }
+              }}
+              aria-current={index === routeIndex ? "page" : undefined}
               className={`shrink-0 whitespace-nowrap ${radius} text-sm transition-colors ${
                 item.icon
                   ? "flex flex-col items-center gap-1 px-3 py-1.5 text-[11px] leading-none"
