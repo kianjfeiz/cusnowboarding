@@ -56,7 +56,11 @@ async function getStorage(): Promise<Storage | null> {
     client: new S3Client({
       // R2 has no regions, but the SigV4 signer insists on a value.
       region: "auto",
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      // R2_ENDPOINT points at a local S3-compatible server for development and
+      // load measurement; production leaves it unset and talks to R2.
+      endpoint:
+        process.env.R2_ENDPOINT || `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      forcePathStyle: Boolean(process.env.R2_ENDPOINT),
       credentials: {
         accessKeyId: process.env.R2_ACCESS_KEY_ID!,
         secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
