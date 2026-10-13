@@ -10,7 +10,7 @@ import {
 } from "@/lib/photos/r2";
 
 /**
- * The club photo pool, one gallery per trip or event.
+ * The club photo pool, one gallery per trip. Events do not get galleries.
  *
  * ONE RULE GOVERNS THIS FILE: any signed-in member may view and upload to any
  * gallery, by the board's explicit decision; removal stays with the uploader or
@@ -65,34 +65,30 @@ export class PhotoAccessError extends Error {
   }
 }
 
-/** One outing per gallery; the database enforces it (`trip_photos_one_subject`). */
-export type PhotoSubject =
-  | { type: "trip"; id: string }
-  | { type: "event"; id: string };
-
 /** The whole rule: signed in, or on the board. No per-outing gate. */
 export function canUsePhotos(viewer: PhotoViewer): boolean {
   return viewer.memberId !== null || viewer.isModerator;
 }
 
 /**
- * Every outing members are shown at all, as one relation: the single
- * definition of which galleries exist. Draft trips and draft events have not
- * been announced, and archived trips are out of the running. This is
- * existence, not access - access is `canUsePhotos`.
+ * The single definition of which galleries exist: every trip members are shown
+ * at all. Drafts have not been announced and archived trips are out of the
+ * running. Events never get one - the `event_id` column on `trip_photos` is
+ * left over from when they did. This is existence, not access - access is
+ * `canUsePhotos`.
  */
-const VISIBLE_SUBJECTS = `(
-  select 'trip' as type, id, slug, title, resort as place, depart_at as "startsAt"
+const GALLERY_TRIPS = `(
+  select id, slug, title, resort as place, depart_at as "startsAt"
     from trips
    where status <> 'draft' and archived_at is null
-  union all
-  select 'event', id, slug, title, location_name, starts_at
-    from events
-   where status = 'published'
 )`;
 
-const subjectColumn = (subject: PhotoSubject) =>
-  subject.type === "trip" ? "trip_id" : "event_id";
+/**
+ * taken_at first so a weekend reads as the day it was; photos whose EXIF did
+ * not survive the upload fall to the end in arrival order. Shared so the Photos
+ * tab preview shows the same first photos the gallery opens on.
+ */
+const GALLERY_ORDER = "p.taken_at, p.created_at";
 
 export interface GalleryPhoto {
   id: string;
@@ -114,7 +110,7 @@ export interface GalleryPhoto {
  * forgot to check.
  */
 export async function listPhotos(
-  subject: PhotoSubject,
+  tripId: string,
   viewer: PhotoViewer,
 ): Promise<GalleryPhoto[]> {
   if (!canUsePhotos(viewer)) throw new PhotoAccessError();
@@ -125,11 +121,9 @@ export async function listPhotos(
             m.first_name || ' ' || m.last_name as "uploaderName"
        from trip_photos p
        join members m on m.id = p.uploader_member_id
-      where p.${subjectColumn(subject)} = $1 and p.status = 'ready'
-      -- taken_at first so a weekend reads as the day it was; photos whose EXIF
-      -- did not survive the upload fall to the end in arrival order.
-      order by p.taken_at, p.created_at`,
-    [subject.id],
+      where p.trip_id = $1 and p.status = 'ready'
+      order by ${GALLERY_ORDER}`,
+    [tripId],
   );
 
   return Promise.all(
@@ -177,52 +171,69 @@ export async function getPhotoDownload(
   return url ? { url, filename } : null;
 }
 
-export interface PhotoSubjectInfo {
-  type: "trip" | "event";
+export interface GalleryTrip {
   id: string;
   slug: string;
   title: string;
-  /** Resort for a trip, location for an event; null when unset. */
+  /** The resort; null when unset. */
   place: string | null;
-  /** Departure for a trip, start for an event. */
   startsAt: Date;
 }
 
-export interface PhotoSubjectCard extends PhotoSubjectInfo {
+/** How many photos a Photos tab tile previews. */
+export const PREVIEW_COUNT = 4;
+
+export interface GalleryTripCard extends GalleryTrip {
   photoCount: number;
+  /** The gallery's first few photos, freshly signed; null urls when storage is unset. */
+  preview: { id: string; url: string | null }[];
 }
 
 /**
- * Every outing a gallery can exist for, newest first, with its ready-photo
- * count. Zero-photo outings are listed on purpose: the empty gallery is the
- * invitation to fill it after the weekend.
+ * Every trip gallery, newest first, with its ready-photo count and the first
+ * few photos. Zero-photo trips are listed on purpose: the empty gallery is the
+ * invitation to fill it after the weekend. Like `listPhotos`, this refuses the
+ * signed-out rather than handing them signed URLs.
  */
-export async function listPhotoSubjects(): Promise<PhotoSubjectCard[]> {
-  return execute<PhotoSubjectCard>(
-    `select s.*,
+export async function listGalleryTrips(viewer: PhotoViewer): Promise<GalleryTripCard[]> {
+  if (!canUsePhotos(viewer)) throw new PhotoAccessError();
+
+  const rows = await execute<
+    GalleryTrip & { photoCount: number; previewKeys: { id: string; key: string }[] }
+  >(
+    `select t.*,
             (select count(*)::int from trip_photos p
-              where p.status = 'ready'
-                and ((s.type = 'trip' and p.trip_id = s.id)
-                  or (s.type = 'event' and p.event_id = s.id))) as "photoCount"
-       from ${VISIBLE_SUBJECTS} s
-      order by s."startsAt" desc`,
+              where p.trip_id = t.id and p.status = 'ready') as "photoCount",
+            coalesce((select json_agg(json_build_object('id', f.id, 'key', f.storage_key))
+                        from (select p.id, p.storage_key from trip_photos p
+                               where p.trip_id = t.id and p.status = 'ready'
+                               order by ${GALLERY_ORDER}
+                               limit ${PREVIEW_COUNT}) f), '[]'::json) as "previewKeys"
+       from ${GALLERY_TRIPS} t
+      order by t."startsAt" desc`,
+  );
+
+  return Promise.all(
+    rows.map(async ({ previewKeys, ...trip }) => ({
+      ...trip,
+      preview: await Promise.all(
+        previewKeys.map(async ({ id, key }) => ({ id, url: await presignRead(key) })),
+      ),
+    })),
   );
 }
 
-/** The gallery pages' lookup: same visibility rules as the listing above. */
-export async function getPhotoSubjectBySlug(
-  type: "trip" | "event",
-  slug: string,
-): Promise<PhotoSubjectInfo | null> {
-  const rows = await execute<PhotoSubjectInfo>(
-    `select s.* from ${VISIBLE_SUBJECTS} s where s.type = $1 and s.slug = $2 limit 1`,
-    [type, slug],
+/** The gallery page's lookup: same visibility rules as the listing above. */
+export async function getGalleryTripBySlug(slug: string): Promise<GalleryTrip | null> {
+  const rows = await execute<GalleryTrip>(
+    `select t.* from ${GALLERY_TRIPS} t where t.slug = $1 limit 1`,
+    [slug],
   );
   return rows[0] ?? null;
 }
 
 export interface CreatePendingPhotoInput {
-  subject: PhotoSubject;
+  tripId: string;
   memberId: string;
   contentType: string;
   sizeBytes: number;
@@ -251,33 +262,31 @@ export async function createPendingPhoto(
   }
   if (input.sizeBytes > MAX_UPLOAD_BYTES) return { ok: false, reason: "too_large" };
 
-  // Any member may upload; what must exist is the outing itself. A draft or
-  // archived outing gets "forbidden" rather than a distinct answer, so ids
+  // Any member may upload; what must exist is the gallery itself. A draft or
+  // archived trip gets "forbidden" rather than a distinct answer, so ids
   // cannot be walked to learn which drafts exist.
-  const visible = await execute(
-    `select 1 from ${VISIBLE_SUBJECTS} s where s.type = $1 and s.id = $2`,
-    [input.subject.type, input.subject.id],
-  );
+  const visible = await execute(`select 1 from ${GALLERY_TRIPS} t where t.id = $1`, [
+    input.tripId,
+  ]);
   if (visible.length === 0) return { ok: false, reason: "forbidden" };
 
   if (!isPhotoStorageConfigured()) return { ok: false, reason: "storage_unconfigured" };
 
-  // Namespaced by outing so a bucket listing, a lifecycle rule, or a bulk
+  // Namespaced by trip so a bucket listing, a lifecycle rule, or a bulk
   // delete can operate on one gallery without consulting the database.
-  const prefix = input.subject.type === "trip" ? "trips" : "events";
-  const storageKey = `${prefix}/${input.subject.id}/${randomUUID()}.${EXTENSIONS[input.contentType]}`;
+  const storageKey = `trips/${input.tripId}/${randomUUID()}.${EXTENSIONS[input.contentType]}`;
 
   const uploadUrl = await presignUpload(storageKey, input.contentType);
   if (!uploadUrl) return { ok: false, reason: "storage_unconfigured" };
 
   const rows = await execute<{ id: string }>(
     `insert into trip_photos (
-       ${subjectColumn(input.subject)}, uploader_member_id, storage_key, original_filename,
+       trip_id, uploader_member_id, storage_key, original_filename,
        content_type, size_bytes, taken_at, status
      ) values ($1, $2, $3, $4, $5, $6, $7, 'processing')
      returning id`,
     [
-      input.subject.id,
+      input.tripId,
       input.memberId,
       storageKey,
       input.originalFilename?.slice(0, 255) ?? null,

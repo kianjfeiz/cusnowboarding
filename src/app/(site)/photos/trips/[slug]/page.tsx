@@ -4,43 +4,36 @@ import { Notice, PageHeader, formatDenver } from "@/components/ui";
 import { PhotoGrid } from "@/components/photos/photo-grid";
 import { PhotoUploader } from "@/components/photos/photo-uploader";
 import { resolvePhotoViewer } from "@/lib/photos/viewer";
-import { canUsePhotos, getPhotoSubjectBySlug, listPhotos } from "@/lib/photos/photos";
+import { canUsePhotos, getGalleryTripBySlug, listPhotos } from "@/lib/photos/photos";
 import { isPhotoStorageConfigured } from "@/lib/photos/r2";
 
 /** Signed URLs expire, so this page can never be cached or statically rendered. */
 export const dynamic = "force-dynamic";
 
-type Params = { params: Promise<{ kind: string; slug: string }> };
+type Params = { params: Promise<{ slug: string }> };
 
-/** Serves /photos/trips/<slug> and /photos/events/<slug>; anything else is a 404. */
-async function loadSubject({ params }: Params) {
-  const { kind, slug } = await params;
-  const type = kind === "trips" ? "trip" : kind === "events" ? "event" : null;
-  return type ? getPhotoSubjectBySlug(type, slug) : null;
-}
-
-export async function generateMetadata(props: Params): Promise<Metadata> {
-  const subject = await loadSubject(props);
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
+  const trip = await getGalleryTripBySlug((await params).slug);
   return {
-    title: subject ? `Photos - ${subject.title}` : "Gallery not found",
+    title: trip ? `Photos - ${trip.title}` : "Gallery not found",
     robots: { index: false, follow: false },
   };
 }
 
-/** One gallery, trip or event. Club-wide: any signed-in member may view and upload. */
-export default async function GalleryPage(props: Params) {
-  const subject = await loadSubject(props);
-  if (!subject) notFound();
+/** One trip's gallery. Club-wide: any signed-in member may view and upload. */
+export default async function GalleryPage({ params }: Params) {
+  const trip = await getGalleryTripBySlug((await params).slug);
+  if (!trip) notFound();
 
   const viewer = await resolvePhotoViewer();
-  const photos = canUsePhotos(viewer) ? await listPhotos(subject, viewer) : null;
+  const photos = canUsePhotos(viewer) ? await listPhotos(trip.id, viewer) : null;
 
   return (
     <main className="mx-auto max-w-5xl px-5 py-12">
-      <PageHeader back="/photos" backLabel="Photos" title={subject.title}>
+      <PageHeader back="/photos" backLabel="Photos" title={trip.title}>
         <p className="mt-2 text-sm text-ink-muted">
-          {formatDenver(subject.startsAt)}
-          {subject.place ? ` · ${subject.place}` : ""}
+          {formatDenver(trip.startsAt)}
+          {trip.place ? ` · ${trip.place}` : ""}
         </p>
       </PageHeader>
 
@@ -53,7 +46,7 @@ export default async function GalleryPage(props: Params) {
       ) : (
         <div className="space-y-8">
           {isPhotoStorageConfigured() ? (
-            <PhotoUploader subject={{ type: subject.type, id: subject.id }} />
+            <PhotoUploader tripId={trip.id} />
           ) : (
             <Notice title="Photo uploads are not set up yet" />
           )}

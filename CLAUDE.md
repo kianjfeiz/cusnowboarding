@@ -62,13 +62,14 @@ reintroduce a way to set them apart.
 
 ## Photos are club-wide, on the Photos tab
 
-Every trip and every published event has a gallery under `/photos`; any
-signed-in member may view and upload to any of them, and removal stays with the
-uploader or the board. This audience is the board's explicit decision - do not
-reintroduce per-trip attendance gating. The domain rules live in
-`src/lib/photos/photos.ts` (one table, `trip_photos`, holding both subjects with a
-one-subject check constraint); bytes stay in a private R2 bucket behind
-short-lived signed URLs, never public object URLs.
+Every trip has a gallery under `/photos/trips/<slug>`; events do not get one.
+Any signed-in member may view and upload to any of them, and removal stays with
+the uploader or the board. This audience is the board's explicit decision - do
+not reintroduce per-trip attendance gating. The domain rules live in
+`src/lib/photos/photos.ts` (one table, `trip_photos`; its `event_id` column is
+left over from event galleries and nothing writes it); bytes stay in a private
+R2 bucket behind short-lived signed URLs, never public object URLs. The Photos
+tab is a plain tile per trip with its first few photos as a preview strip.
 
 ## Email policy: two sends, both board clicks
 
@@ -222,13 +223,8 @@ Motion is nearly absent on purpose. Interactive elements get a short
 animations, stagger, hover lifts, press scales or sliding indicators; the nav's
 active tab is a flat `surface-strong` fill. The only animations are the signup
 pulse dot (live state, the one loop allowed), loading skeletons, the upload
-progress bar, a 150ms fade on native dialogs, and the Photos tab's folders
-opening on hover or keyboard focus (the front panel folds down on its hinge and
-the sheets inside rise; transform only, under 400ms, reversing on the way out,
-never looping). The folders are a deliberate exception the owner asked for, not
-a precedent for other cards. Those last two are the only things
-`prefers-reduced-motion` governs in `globals.css`: dialogs skip the fade, and
-folders stay shut and answer with a fill change. No gradients as decoration.
+progress bar, and a 150ms fade on native dialogs. That fade is the only thing
+`prefers-reduced-motion` governs in `globals.css`. No gradients as decoration.
 
 **No emojis anywhere** - not in UI copy, code, comments, or commit messages.
 

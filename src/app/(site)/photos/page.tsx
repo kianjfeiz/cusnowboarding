@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import { Card } from "@/components/ui";
-import { FolderCard } from "@/components/photos/folder-card";
-import { listPhotoSubjects } from "@/lib/photos/photos";
+import { Card, Notice } from "@/components/ui";
+import { TripTile } from "@/components/photos/trip-tile";
+import { resolvePhotoViewer } from "@/lib/photos/viewer";
+import { canUsePhotos, listGalleryTrips } from "@/lib/photos/photos";
 
-/** Counts change as people upload; never cache a stale zero. */
+/** Counts change as people upload, and preview URLs are signed; never cache. */
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
@@ -12,33 +13,40 @@ export const metadata: Metadata = {
 };
 
 /**
- * One folder per outing that has started, listed even with zero photos: the
- * empty gallery is the invitation. Outings still ahead have nothing to show,
- * so they wait until their day. `listPhotoSubjects` already sorts newest first.
+ * One tile per trip that has departed, listed even with zero photos: the empty
+ * gallery is the invitation. Trips still ahead have nothing to show, so they
+ * wait until their day. Events do not get galleries.
  */
 export default async function PhotosPage() {
+  const viewer = await resolvePhotoViewer();
   const now = Date.now();
-  const galleries = (await listPhotoSubjects()).filter(
-    (subject) => subject.startsAt.getTime() <= now,
-  );
+  const trips = canUsePhotos(viewer)
+    ? (await listGalleryTrips(viewer)).filter((trip) => trip.startsAt.getTime() <= now)
+    : null;
 
   return (
-    <main className="mx-auto max-w-7xl overflow-x-clip px-5 py-12">
+    <main className="mx-auto max-w-7xl px-5 py-12">
       <header className="mb-8">
         <h1 className="text-3xl font-semibold tracking-tight">Photos</h1>
       </header>
 
-      {galleries.length === 0 ? (
+      {trips === null ? (
+        // Only reachable when a session exists without a member behind it.
+        <Notice title="Sign in to see photos">
+          Galleries are for club members. Sign in with the CU address you use
+          for the club and reload this page.
+        </Notice>
+      ) : trips.length === 0 ? (
         <Card>
           <p className="text-sm text-ink-muted">
-            No galleries yet - each trip and event gets one here once it has started.
+            No galleries yet - each trip gets one here once it has left.
           </p>
         </Card>
       ) : (
-        <ul className="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
-          {galleries.map((subject) => (
-            <li key={`${subject.type}-${subject.id}`}>
-              <FolderCard subject={subject} />
+        <ul className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {trips.map((trip) => (
+            <li key={trip.id}>
+              <TripTile trip={trip} />
             </li>
           ))}
         </ul>

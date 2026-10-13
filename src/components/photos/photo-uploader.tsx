@@ -62,12 +62,7 @@ function putWithProgress(
   });
 }
 
-export function PhotoUploader({
-  subject,
-}: {
-  /** The gallery this uploads into - one trip or one event. */
-  subject: { type: "trip" | "event"; id: string };
-}) {
+export function PhotoUploader({ tripId }: { tripId: string }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -86,7 +81,7 @@ export function PhotoUploader({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        [subject.type === "trip" ? "tripId" : "eventId"]: subject.id,
+        tripId,
         contentType: file.type,
         sizeBytes: file.size,
         originalFilename: file.name,
