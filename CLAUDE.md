@@ -71,6 +71,12 @@ left over from event galleries and nothing writes it); bytes stay in a private
 R2 bucket behind short-lived signed URLs, never public object URLs. The Photos
 tab is a plain tile per trip with its first few photos as a preview strip.
 
+Grids and previews show thumbnails (`src/lib/photos/thumbnails.ts`, made after
+each upload and backfilled a few per gallery view); only the lightbox and
+downloads load an original. Read URLs are signed against a 15-minute window so
+they repeat across page loads and the browser cache works - do not go back to
+signing against "now".
+
 ## Email policy: two sends, both board clicks
 
 The ONLY emails this app ever sends are the roster release to riders on the trip (`releaseResults`) and

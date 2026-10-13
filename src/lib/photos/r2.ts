@@ -13,8 +13,14 @@ import type { S3Client } from "@aws-sdk/client-s3";
  *    for it.
  */
 
-/** Long enough to load a gallery and open a few photos, short enough that a leaked URL dies fast. */
-const READ_URL_TTL_SECONDS = 15 * 60;
+/**
+ * Read URLs are signed as of the start of a fixed window rather than "now", so
+ * every page load inside one window gets byte-identical URLs and the browser
+ * serves repeat views from its cache instead of refetching. A URL therefore
+ * lives between one and two windows: long enough to browse a gallery, short
+ * enough that a leaked URL dies within half an hour.
+ */
+const READ_URL_WINDOW_SECONDS = 15 * 60;
 
 /** The browser PUTs immediately after asking, so this only has to survive a slow phone. */
 const UPLOAD_URL_TTL_SECONDS = 5 * 60;
@@ -98,6 +104,8 @@ async function signGet(storageKey: string, disposition?: string): Promise<string
     import("@aws-sdk/s3-request-presigner"),
   ]);
 
+  const windowMs = READ_URL_WINDOW_SECONDS * 1000;
+
   try {
     return await getSignedUrl(
       s.client,
@@ -105,8 +113,12 @@ async function signGet(storageKey: string, disposition?: string): Promise<string
         Bucket: s.bucket,
         Key: storageKey,
         ResponseContentDisposition: disposition,
+        ResponseCacheControl: `private, max-age=${READ_URL_WINDOW_SECONDS}`,
       }),
-      { expiresIn: READ_URL_TTL_SECONDS },
+      {
+        expiresIn: READ_URL_WINDOW_SECONDS * 2,
+        signingDate: new Date(Math.floor(Date.now() / windowMs) * windowMs),
+      },
     );
   } catch {
     // One unsignable key must not take down a gallery of forty photos.
