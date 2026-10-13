@@ -17,13 +17,14 @@ export function TripTile({ trip }: { trip: GalleryTripCard }) {
       <div aria-hidden className="grid grid-cols-4 gap-1">
         {Array.from({ length: PREVIEW_COUNT }, (_, i) => {
           const photo = trip.preview[i];
-          return photo?.url ? (
+          return photo?.url && !photo.needsThumbnail ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               key={photo.id}
               src={photo.url}
               alt=""
               loading="lazy"
+              decoding="async"
               className="aspect-square w-full rounded bg-surface object-cover"
             />
           ) : (

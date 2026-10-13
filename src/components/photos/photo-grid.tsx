@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, cn } from "@/components/ui";
 
@@ -22,6 +22,9 @@ export interface PhotoView {
  */
 const DOWNLOAD_GAP_MS = 350;
 
+/** Two rows on a desktop grid; everything below them waits to be scrolled to. */
+const EAGER_TILES = 8;
+
 /** Moves the lightbox by `delta`, stopping at either end. */
 const stepWithin = (delta: number, count: number) => (index: number | null) =>
   index === null ? index : Math.min(Math.max(index + delta, 0), count - 1);
@@ -30,14 +33,22 @@ const stepWithin = (delta: number, count: number) => (index: number | null) =>
  * The gallery. Signed URLs expire, so a removal ends in `router.refresh()`
  * rather than local state surgery - never show a member a dead image.
  */
-export function PhotoGrid({ photos }: { photos: PhotoView[] }) {
+export function PhotoGrid({ photos: allPhotos }: { photos: PhotoView[] }) {
   const router = useRouter();
+  // Hidden the moment the server confirms a removal, rather than after the
+  // refresh that re-renders the page round-trips.
+  const [removedIds, setRemovedIds] = useState<ReadonlySet<string>>(new Set());
+  const photos = useMemo(
+    () => allPhotos.filter((photo) => !removedIds.has(photo.id)),
+    [allPhotos, removedIds],
+  );
+  const refreshedFor = useRef<PhotoView[] | null>(null);
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [removing, setRemoving] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState<{ done: number; total: number } | null>(null);
-  const [failedOriginal, setFailedOriginal] = useState<string | null>(null);
+  const [failedUrls, setFailedUrls] = useState<ReadonlySet<string>>(new Set());
   const unmounted = useRef(false);
 
   useEffect(() => {
@@ -81,7 +92,8 @@ export function PhotoGrid({ photos }: { photos: PhotoView[] }) {
       const response = await fetch(`/api/photos/${photoId}`, { method: "DELETE" });
       if (response.ok) {
         setOpenIndex(null);
-        router.refresh();
+        setRemovedIds((current) => new Set(current).add(photoId));
+        startTransition(() => router.refresh());
       }
     } finally {
       setRemoving(false);
@@ -119,6 +131,35 @@ export function PhotoGrid({ photos }: { photos: PhotoView[] }) {
   }
 
   const active = openIndex === null ? null : photos[openIndex];
+  const showOriginal = Boolean(active?.url && !failedUrls.has(active.url));
+
+  /**
+   * Signed URLs outlive neither a long-open page nor a browser that cannot
+   * decode the file (HEIC outside Safari). Either way the image errors; ask
+   * the server for fresh URLs once per failing URL. Inside the same signing
+   * window they come back identical, so this costs a round trip, not a reload,
+   * and a URL that failed for a real reason is not retried in a loop.
+   */
+  function imageFailed(url: string) {
+    if (failedUrls.has(url)) return;
+    setFailedUrls((current) => new Set(current).add(url));
+    // One refresh per set of URLs the server handed down: a burst of failing
+    // tiles (several HEIC photos, or a whole expired page) must not queue a
+    // server render each.
+    if (refreshedFor.current === allPhotos) return;
+    refreshedFor.current = allPhotos;
+    startTransition(() => router.refresh());
+  }
+  /**
+   * Once the open photo has arrived, fetch the next original in the
+   * background so the arrow key lands on a sharp image. One ahead only: each
+   * is several megabytes.
+   */
+  function preloadOriginal(index: number) {
+    const next = photos[index]?.url;
+    if (next) new Image().src = next;
+  }
+
   const allSelected = selected.size === photos.length;
 
   return (
@@ -192,8 +233,12 @@ export function PhotoGrid({ photos }: { photos: PhotoView[] }) {
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={photo.thumbUrl ?? photo.url ?? undefined}
+                    onError={() => imageFailed((photo.thumbUrl ?? photo.url)!)}
                     alt={photo.caption ?? `Photo by ${photo.uploaderName}`}
-                    loading="lazy"
+                    // The first rows are on screen at once; waiting for layout
+                    // to approve them only delays the first paint.
+                    loading={index < EAGER_TILES ? "eager" : "lazy"}
+                    fetchPriority={index < 4 ? "high" : undefined}
                     decoding="async"
                     className={cn("aspect-square w-full object-cover", isSelected && "opacity-80")}
                   />
@@ -262,34 +307,35 @@ export function PhotoGrid({ photos }: { photos: PhotoView[] }) {
               <span aria-hidden="true">&larr;</span>
             </Button>
 
-            {active.url || active.thumbUrl ? (
-              // The thumbnail is already cached from the grid, so it shows at
-              // once; the original paints over it when its bytes arrive.
-              <div className="relative h-full min-w-0 flex-1">
+            {showOriginal || active.thumbUrl ? (
+              // Keyed per photo so the next photo never paints over the last
+              // one's thumbnail. The thumbnail is already cached from the grid,
+              // so it shows at once; the original paints over it when it lands.
+              <div key={active.id} className="relative h-full min-w-0 flex-1">
                 {active.thumbUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={active.thumbUrl}
-                    alt=""
-                    aria-hidden
+                    alt={showOriginal ? "" : (active.caption ?? `Photo by ${active.uploaderName}`)}
+                    aria-hidden={showOriginal || undefined}
                     className="absolute inset-0 h-full w-full object-contain"
                   />
                 ) : null}
-                {active.url && failedOriginal !== active.id ? (
+                {showOriginal ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    key={active.id}
-                    src={active.url}
+                    src={active.url!}
                     alt={active.caption ?? `Photo by ${active.uploaderName}`}
-                    // A browser that cannot decode the original (HEIC outside
-                    // Safari) would draw a broken icon over the thumbnail.
-                    onError={() => setFailedOriginal(active.id)}
+                    onError={() => imageFailed(active.url!)}
+                    onLoad={() => preloadOriginal(openIndex! + 1)}
                     className="absolute inset-0 h-full w-full object-contain"
                   />
                 ) : null}
               </div>
             ) : (
-              <p className="text-sm text-ink-muted">This photo could not be loaded.</p>
+              <p className="min-w-0 flex-1 text-center text-sm text-ink-muted">
+                This photo cannot be shown here. Download has the original.
+              </p>
             )}
 
             <Button
@@ -302,6 +348,11 @@ export function PhotoGrid({ photos }: { photos: PhotoView[] }) {
             </Button>
           </div>
 
+          {!showOriginal && active.thumbUrl ? (
+            <p className="pt-3 text-center text-xs text-ink-faint">
+              Showing a preview. Download has the full-size photo.
+            </p>
+          ) : null}
           {active.caption ? (
             <p className="pt-3 text-center text-sm text-ink-muted">{active.caption}</p>
           ) : null}

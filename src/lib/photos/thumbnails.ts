@@ -13,8 +13,11 @@ const THUMBNAIL_MAX_EDGE = 640;
 /** What the bundled sharp can decode. HEIC needs a codec it does not ship. */
 const DECODABLE = ["image/jpeg", "image/png", "image/webp"];
 
-/** Bounds the work one page view can schedule, so a backlog drains gradually. */
-const MAX_PER_RUN = 4;
+/**
+ * Bounds one run. Thumbnails are ~200-400ms each, so a whole trip's backlog
+ * clears on its first gallery view, well inside a serverless time limit.
+ */
+const MAX_PER_RUN = 40;
 
 export function thumbnailKeyFor(storageKey: string): string {
   return `${storageKey.replace(/\.[a-z0-9]+$/i, "")}.thumb.webp`;
