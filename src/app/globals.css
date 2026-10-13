@@ -1,9 +1,10 @@
 @import "tailwindcss";
 
 /*
- * A deliberately small palette: paper, ink, a single accent, and one alert
- * colour. Status is carried by label and weight rather than by hue, so a
- * roster of 25 rows stays readable.
+ * A deliberately small palette: paper, ink, and one alert colour. The accent
+ * is the ink itself rather than a brand hue - links, today, focus and selection
+ * are marked by weight and underline, not colour. Status is carried by label
+ * and weight too, so a roster of 25 rows stays readable.
  */
 :root {
   --paper: #ffffff;
@@ -14,9 +15,9 @@
   --ink: #16161a;
   --ink-muted: #6b6b76;
   --ink-faint: #9a9aa5;
-  --accent: #1f4fd8;
-  --accent-hover: #1a43ba;
-  --accent-soft: #eef2fe;
+  --accent: #16161a;
+  --accent-hover: #3d3d46;
+  --accent-soft: #f0f0f3;
   --alert: #b3261e;
   --alert-soft: #fdeceb;
 }
@@ -31,9 +32,9 @@
     --ink: #ececf0;
     --ink-muted: #9d9da8;
     --ink-faint: #6f6f7a;
-    --accent: #7d9bff;
-    --accent-hover: #93abff;
-    --accent-soft: #191f33;
+    --accent: #ececf0;
+    --accent-hover: #b4b4be;
+    --accent-soft: #232329;
     --alert: #f2867d;
     --alert-soft: #2a1917;
   }

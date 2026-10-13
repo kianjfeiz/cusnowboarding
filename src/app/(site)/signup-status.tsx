@@ -43,7 +43,7 @@ export function PayNowLink({ payToken }: { payToken: string }) {
   return (
     <Link
       href={`/pay/${payToken}`}
-      className="inline-flex h-9 shrink-0 items-center rounded-md bg-accent px-4 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+      className="inline-flex h-9 shrink-0 items-center rounded-md bg-ink px-4 text-sm font-medium text-paper transition-colors hover:bg-ink/85"
     >
       Pay now
     </Link>

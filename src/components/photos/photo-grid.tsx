@@ -198,7 +198,7 @@ export function PhotoGrid({ photos }: { photos: PhotoView[] }) {
                   </span>
                 )}
                 {isSelected ? (
-                  <span className="absolute left-2 top-2 rounded bg-accent px-1.5 py-0.5 text-xs font-semibold text-white">
+                  <span className="absolute left-2 top-2 rounded bg-accent px-1.5 py-0.5 text-xs font-semibold text-paper">
                     Selected
                   </span>
                 ) : null}

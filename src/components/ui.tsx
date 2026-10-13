@@ -32,7 +32,7 @@ export function Button({
   const base =
     "inline-flex items-center justify-center rounded-md px-4 h-10 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none";
   const variants = {
-    primary: "bg-accent text-white hover:bg-accent-hover",
+    primary: "bg-ink text-paper hover:bg-ink/85",
     secondary: "border border-border-strong bg-paper text-ink hover:bg-surface",
     quiet: "text-ink-muted hover:text-ink hover:bg-surface",
     danger: "border border-border-strong text-alert hover:bg-alert-soft",

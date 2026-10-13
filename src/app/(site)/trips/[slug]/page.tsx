@@ -91,7 +91,7 @@ export default async function TripPage({ params }: { params: Promise<{ slug: str
           </p>
           <a
             href={`/api/member/arm?next=/trips/${trip.slug}`}
-            className="inline-flex h-10 items-center rounded-md bg-accent px-4 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+            className="inline-flex h-10 items-center rounded-md bg-ink px-4 text-sm font-medium text-paper transition-colors hover:bg-ink/85"
           >
             Set up this browser
           </a>

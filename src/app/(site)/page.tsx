@@ -158,7 +158,7 @@ export default async function Home() {
               {heroStanding ? (
                 <Badge emphasis="strong">{STANDING_LABEL[heroStanding]}</Badge>
               ) : (
-                <span className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white transition-colors group-hover:bg-accent-hover">
+                <span className="inline-flex h-10 items-center gap-2 rounded-md bg-ink px-4 text-sm font-medium text-paper transition-colors group-hover:bg-ink/85">
                   {heroState.live ? "Sign up" : "Get ready"}
                   <span aria-hidden="true">&rarr;</span>
                 </span>
