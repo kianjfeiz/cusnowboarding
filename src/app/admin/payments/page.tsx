@@ -410,14 +410,15 @@ function PaymentRow({
         <Td className="whitespace-nowrap">
           {owing ? (
             <div className="flex items-center justify-end gap-1">
-              <SubmitButton
-                form={MARK_PAID_FORM}
-                name="only"
-                value={line.signup_id}
-                confirm={`Mark ${who} paid through Fusion?`}
-              >
-                Mark paid
-              </SubmitButton>
+              {/* Its own form, not the shared one: useFormStatus only sees a
+                  parent <form>, so a button joined by the form attribute could
+                  never show that it was saving. `only` wins over any ticks. */}
+              <form action={recordPaymentAction}>
+                <input type="hidden" name="only" value={line.signup_id} />
+                <SubmitButton pendingLabel="Saving" confirm={`Mark ${who} paid through Fusion?`}>
+                  Mark paid
+                </SubmitButton>
+              </form>
               <RowPopover
                 id={`other-${line.signup_id}`}
                 label="Other"
