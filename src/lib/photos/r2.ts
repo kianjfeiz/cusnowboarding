@@ -160,6 +160,41 @@ export async function headObject(
   }
 }
 
+/** The whole object, for server-side processing. Null when missing or unconfigured. */
+export async function getObjectBytes(storageKey: string): Promise<Uint8Array | null> {
+  const s = await getStorage();
+  if (!s) return null;
+
+  const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+
+  try {
+    const result = await s.client.send(new GetObjectCommand({ Bucket: s.bucket, Key: storageKey }));
+    return result.Body ? await result.Body.transformToByteArray() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function putObject(
+  storageKey: string,
+  body: Uint8Array,
+  contentType: string,
+): Promise<boolean> {
+  const s = await getStorage();
+  if (!s) return false;
+
+  const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+
+  try {
+    await s.client.send(
+      new PutObjectCommand({ Bucket: s.bucket, Key: storageKey, Body: body, ContentType: contentType }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function deleteObject(storageKey: string): Promise<boolean> {
   const s = await getStorage();
   if (!s) return false;

@@ -164,6 +164,7 @@ describe("listing galleries", () => {
     expect(photos[0].uploaderName.length).toBeGreaterThan(0);
     // Storage is deliberately unconfigured here; the row still lists.
     expect(photos[0].url).toBeNull();
+    expect(photos[0].thumbUrl).toBeNull();
   });
 
   test("a trip gallery never shows another trip's photos", async () => {
@@ -209,6 +210,20 @@ describe("the Photos tab listing", () => {
     expect(card!.preview.map((p) => p.id)).toEqual(
       gallery.slice(0, PREVIEW_COUNT).map((p) => p.id),
     );
+  });
+
+  test("previews prefer the thumbnail and flag photos that still need one", async () => {
+    const fresh = await createTestTrip({ capacity: 2 });
+    const withThumb = await insertPhoto(fresh, memberA);
+    const without = await insertPhoto(fresh, memberA);
+    await setupPool.query(
+      `update trip_photos set thumbnail_key = storage_key || '.thumb.webp' where id = $1`,
+      [withThumb],
+    );
+
+    const card = (await listGalleryTrips(asMember(memberB))).find((c) => c.id === fresh);
+    const flags = Object.fromEntries(card!.preview.map((p) => [p.id, p.needsThumbnail]));
+    expect(flags).toEqual({ [withThumb]: false, [without]: true });
   });
 
   test("an empty gallery is listed with an empty preview", async () => {

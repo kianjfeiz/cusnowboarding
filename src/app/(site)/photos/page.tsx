@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { after } from "next/server";
 import { Card, Notice } from "@/components/ui";
 import { TripTile } from "@/components/photos/trip-tile";
 import { resolvePhotoViewer } from "@/lib/photos/viewer";
 import { canUsePhotos, listGalleryTrips } from "@/lib/photos/photos";
+import { generateThumbnails } from "@/lib/photos/thumbnails";
 
 /** Counts change as people upload, and preview URLs are signed; never cache. */
 export const dynamic = "force-dynamic";
@@ -23,6 +25,11 @@ export default async function PhotosPage() {
   const trips = canUsePhotos(viewer)
     ? (await listGalleryTrips(viewer)).filter((trip) => trip.startsAt.getTime() <= now)
     : null;
+
+  const missing = (trips ?? []).flatMap((trip) =>
+    trip.preview.filter((photo) => photo.needsThumbnail).map((photo) => photo.id),
+  );
+  if (missing.length > 0) after(() => generateThumbnails(missing));
 
   return (
     <main className="mx-auto max-w-7xl px-5 py-12">

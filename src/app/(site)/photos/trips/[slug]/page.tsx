@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 import type { Metadata } from "next";
 import { Notice, PageHeader, formatDenver } from "@/components/ui";
 import { PhotoGrid } from "@/components/photos/photo-grid";
@@ -6,6 +7,7 @@ import { PhotoUploader } from "@/components/photos/photo-uploader";
 import { resolvePhotoViewer } from "@/lib/photos/viewer";
 import { canUsePhotos, getGalleryTripBySlug, listPhotos } from "@/lib/photos/photos";
 import { isPhotoStorageConfigured } from "@/lib/photos/r2";
+import { generateThumbnails } from "@/lib/photos/thumbnails";
 
 /** Signed URLs expire, so this page can never be cached or statically rendered. */
 export const dynamic = "force-dynamic";
@@ -27,6 +29,11 @@ export default async function GalleryPage({ params }: Params) {
 
   const viewer = await resolvePhotoViewer();
   const photos = canUsePhotos(viewer) ? await listPhotos(trip.id, viewer) : null;
+
+  // Photos from before thumbnails existed get theirs a few per view, after the
+  // page has gone out; until then the grid falls back to the original.
+  const missing = photos?.filter((photo) => !photo.thumbUrl).map((photo) => photo.id) ?? [];
+  if (missing.length > 0) after(() => generateThumbnails(missing));
 
   return (
     <main className="mx-auto max-w-5xl px-5 py-12">
@@ -56,6 +63,7 @@ export default async function GalleryPage({ params }: Params) {
               photos={photos.map((photo) => ({
                 id: photo.id,
                 url: photo.url,
+                thumbUrl: photo.thumbUrl,
                 caption: photo.caption,
                 uploaderName: photo.uploaderName,
                 // Formatted here so the browser's locale cannot disagree with it.

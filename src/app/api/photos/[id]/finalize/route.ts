@@ -1,6 +1,7 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { finalizePhoto } from "@/lib/photos/photos";
+import { generateThumbnails } from "@/lib/photos/thumbnails";
 import { resolvePhotoViewer } from "@/lib/photos/viewer";
 
 export const runtime = "nodejs";
@@ -44,5 +45,7 @@ export async function POST(
     );
   }
 
+  // After the response, so the uploader moves on to the next file meanwhile.
+  after(() => generateThumbnails([id]));
   return NextResponse.json({ ok: true });
 }

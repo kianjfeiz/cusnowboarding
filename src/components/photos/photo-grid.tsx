@@ -6,7 +6,10 @@ import { Button, cn } from "@/components/ui";
 
 export interface PhotoView {
   id: string;
+  /** The original; only the lightbox loads it. */
   url: string | null;
+  /** The small copy the grid shows, when one has been made. */
+  thumbUrl: string | null;
   caption: string | null;
   uploaderName: string;
   takenLabel: string;
@@ -34,6 +37,7 @@ export function PhotoGrid({ photos }: { photos: PhotoView[] }) {
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState<{ done: number; total: number } | null>(null);
+  const [failedOriginal, setFailedOriginal] = useState<string | null>(null);
   const unmounted = useRef(false);
 
   useEffect(() => {
@@ -184,12 +188,13 @@ export function PhotoGrid({ photos }: { photos: PhotoView[] }) {
                   isSelected ? "ring-2 ring-accent" : "ring-1 ring-border hover:ring-border-strong",
                 )}
               >
-                {photo.url ? (
+                {photo.thumbUrl || photo.url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={photo.url}
+                    src={photo.thumbUrl ?? photo.url ?? undefined}
                     alt={photo.caption ?? `Photo by ${photo.uploaderName}`}
                     loading="lazy"
+                    decoding="async"
                     className={cn("aspect-square w-full object-cover", isSelected && "opacity-80")}
                   />
                 ) : (
@@ -257,13 +262,32 @@ export function PhotoGrid({ photos }: { photos: PhotoView[] }) {
               <span aria-hidden="true">&larr;</span>
             </Button>
 
-            {active.url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={active.url}
-                alt={active.caption ?? `Photo by ${active.uploaderName}`}
-                className="max-h-full max-w-full object-contain"
-              />
+            {active.url || active.thumbUrl ? (
+              // The thumbnail is already cached from the grid, so it shows at
+              // once; the original paints over it when its bytes arrive.
+              <div className="relative h-full min-w-0 flex-1">
+                {active.thumbUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={active.thumbUrl}
+                    alt=""
+                    aria-hidden
+                    className="absolute inset-0 h-full w-full object-contain"
+                  />
+                ) : null}
+                {active.url && failedOriginal !== active.id ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={active.id}
+                    src={active.url}
+                    alt={active.caption ?? `Photo by ${active.uploaderName}`}
+                    // A browser that cannot decode the original (HEIC outside
+                    // Safari) would draw a broken icon over the thumbnail.
+                    onError={() => setFailedOriginal(active.id)}
+                    className="absolute inset-0 h-full w-full object-contain"
+                  />
+                ) : null}
+              </div>
             ) : (
               <p className="text-sm text-ink-muted">This photo could not be loaded.</p>
             )}

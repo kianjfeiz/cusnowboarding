@@ -92,8 +92,10 @@ const GALLERY_ORDER = "p.taken_at, p.created_at";
 
 export interface GalleryPhoto {
   id: string;
-  /** Freshly signed, short lived, and null when storage is not configured. */
+  /** The original, for the lightbox. Signed, short lived, null when storage is not configured. */
   url: string | null;
+  /** The small copy for grids; null until `generateThumbnails` has made one. */
+  thumbUrl: string | null;
   caption: string | null;
   takenAt: Date | null;
   createdAt: Date;
@@ -115,8 +117,14 @@ export async function listPhotos(
 ): Promise<GalleryPhoto[]> {
   if (!canUsePhotos(viewer)) throw new PhotoAccessError();
 
-  const rows = await execute<Omit<GalleryPhoto, "url" | "canRemove"> & { storageKey: string }>(
-    `select p.id, p.storage_key as "storageKey", p.caption, p.taken_at as "takenAt",
+  const rows = await execute<
+    Omit<GalleryPhoto, "url" | "thumbUrl" | "canRemove"> & {
+      storageKey: string;
+      thumbnailKey: string | null;
+    }
+  >(
+    `select p.id, p.storage_key as "storageKey", p.thumbnail_key as "thumbnailKey",
+            p.caption, p.taken_at as "takenAt",
             p.created_at as "createdAt", p.uploader_member_id as "uploaderMemberId",
             m.first_name || ' ' || m.last_name as "uploaderName"
        from trip_photos p
@@ -127,9 +135,10 @@ export async function listPhotos(
   );
 
   return Promise.all(
-    rows.map(async ({ storageKey, ...photo }) => ({
+    rows.map(async ({ storageKey, thumbnailKey, ...photo }) => ({
       ...photo,
       url: await presignRead(storageKey),
+      thumbUrl: thumbnailKey ? await presignRead(thumbnailKey) : null,
       canRemove: viewer.isModerator || viewer.memberId === photo.uploaderMemberId,
     })),
   );
@@ -185,8 +194,12 @@ export const PREVIEW_COUNT = 4;
 
 export interface GalleryTripCard extends GalleryTrip {
   photoCount: number;
-  /** The gallery's first few photos, freshly signed; null urls when storage is unset. */
-  preview: { id: string; url: string | null }[];
+  /**
+   * The gallery's first few photos, signed; null urls when storage is unset.
+   * The thumbnail where one exists, else the original, flagged so the page can
+   * have the thumbnail made.
+   */
+  preview: { id: string; url: string | null; needsThumbnail: boolean }[];
 }
 
 /**
@@ -199,13 +212,17 @@ export async function listGalleryTrips(viewer: PhotoViewer): Promise<GalleryTrip
   if (!canUsePhotos(viewer)) throw new PhotoAccessError();
 
   const rows = await execute<
-    GalleryTrip & { photoCount: number; previewKeys: { id: string; key: string }[] }
+    GalleryTrip & {
+      photoCount: number;
+      previewKeys: { id: string; key: string; thumb: string | null }[];
+    }
   >(
     `select t.*,
             (select count(*)::int from trip_photos p
               where p.trip_id = t.id and p.status = 'ready') as "photoCount",
-            coalesce((select json_agg(json_build_object('id', f.id, 'key', f.storage_key))
-                        from (select p.id, p.storage_key from trip_photos p
+            coalesce((select json_agg(json_build_object(
+                               'id', f.id, 'key', f.storage_key, 'thumb', f.thumbnail_key))
+                        from (select p.id, p.storage_key, p.thumbnail_key from trip_photos p
                                where p.trip_id = t.id and p.status = 'ready'
                                order by ${GALLERY_ORDER}
                                limit ${PREVIEW_COUNT}) f), '[]'::json) as "previewKeys"
@@ -217,7 +234,11 @@ export async function listGalleryTrips(viewer: PhotoViewer): Promise<GalleryTrip
     rows.map(async ({ previewKeys, ...trip }) => ({
       ...trip,
       preview: await Promise.all(
-        previewKeys.map(async ({ id, key }) => ({ id, url: await presignRead(key) })),
+        previewKeys.map(async ({ id, key, thumb }) => ({
+          id,
+          url: await presignRead(thumb ?? key),
+          needsThumbnail: thumb === null,
+        })),
       ),
     })),
   );
