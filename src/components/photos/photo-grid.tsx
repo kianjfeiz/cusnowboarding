@@ -22,6 +22,9 @@ export interface PhotoView {
  */
 const DOWNLOAD_GAP_MS = 350;
 
+/** When to look again for thumbnails the server is still making. */
+const THUMBNAIL_CHECKS_MS = [8_000, 25_000];
+
 /** Two rows on a desktop grid; everything below them waits to be scrolled to. */
 const EAGER_TILES = 8;
 
@@ -43,6 +46,19 @@ export function PhotoGrid({ photos: allPhotos }: { photos: PhotoView[] }) {
     [allPhotos, removedIds],
   );
   const refreshedFor = useRef<PhotoView[] | null>(null);
+
+  // Missing thumbnails are made after this page was served; look again twice
+  // so they replace the placeholders without the member reloading.
+  const awaitingThumbnails = allPhotos.some((photo) => photo.url && !photo.thumbUrl);
+  const thumbnailChecks = useRef(0);
+  useEffect(() => {
+    if (!awaitingThumbnails || thumbnailChecks.current >= THUMBNAIL_CHECKS_MS.length) return;
+    const timer = setTimeout(() => {
+      thumbnailChecks.current += 1;
+      startTransition(() => router.refresh());
+    }, THUMBNAIL_CHECKS_MS[thumbnailChecks.current]);
+    return () => clearTimeout(timer);
+  }, [awaitingThumbnails, allPhotos, router]);
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [removing, setRemoving] = useState(false);
   const [selecting, setSelecting] = useState(false);
@@ -229,11 +245,15 @@ export function PhotoGrid({ photos: allPhotos }: { photos: PhotoView[] }) {
                   isSelected ? "ring-2 ring-accent" : "ring-1 ring-border hover:ring-border-strong",
                 )}
               >
-                {photo.thumbUrl || photo.url ? (
+                {/* Never the original in a tile: twenty phone originals are
+                    hundreds of megapixels, and repainting them made every tap
+                    and scroll stall for half a second. A tile waits for its
+                    thumbnail instead; the lightbox still opens the original. */}
+                {photo.thumbUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={photo.thumbUrl ?? photo.url ?? undefined}
-                    onError={() => imageFailed((photo.thumbUrl ?? photo.url)!)}
+                    src={photo.thumbUrl}
+                    onError={() => imageFailed(photo.thumbUrl!)}
                     alt={photo.caption ?? `Photo by ${photo.uploaderName}`}
                     // The first rows are on screen at once; waiting for layout
                     // to approve them only delays the first paint.
@@ -243,8 +263,8 @@ export function PhotoGrid({ photos: allPhotos }: { photos: PhotoView[] }) {
                     className={cn("aspect-square w-full object-cover", isSelected && "opacity-80")}
                   />
                 ) : (
-                  <span className="flex aspect-square w-full items-center justify-center text-xs text-ink-faint">
-                    Unavailable
+                  <span className="flex aspect-square w-full items-center justify-center px-2 text-center text-xs text-ink-faint">
+                    {photo.url ? "Preview coming" : "Unavailable"}
                   </span>
                 )}
                 {isSelected ? (
@@ -328,6 +348,9 @@ export function PhotoGrid({ photos: allPhotos }: { photos: PhotoView[] }) {
                     alt={active.caption ?? `Photo by ${active.uploaderName}`}
                     onError={() => imageFailed(active.url!)}
                     onLoad={() => preloadOriginal(openIndex! + 1)}
+                    // Decoding tens of megapixels must not hold up the frame
+                    // that shows the thumbnail and the controls.
+                    decoding="async"
                     className="absolute inset-0 h-full w-full object-contain"
                   />
                 ) : null}

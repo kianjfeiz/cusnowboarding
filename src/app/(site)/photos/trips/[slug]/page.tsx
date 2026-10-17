@@ -38,7 +38,7 @@ export default async function GalleryPage({ params }: Params) {
   const photos = canUsePhotos(viewer) ? await listPhotos(trip.id, viewer) : null;
 
   // Photos from before thumbnails existed get theirs after the page has gone
-  // out; until then the grid falls back to the original.
+  // out; until then the grid shows a placeholder and checks back for them.
   const missing = photos?.filter((photo) => !photo.thumbUrl).map((photo) => photo.id) ?? [];
   if (missing.length > 0) after(() => generateThumbnails(missing));
 
