@@ -19,6 +19,8 @@ const DECODABLE = ["image/jpeg", "image/png", "image/webp"];
  */
 const MAX_PER_RUN = 40;
 
+const CONCURRENCY = 3;
+
 export function thumbnailKeyFor(storageKey: string): string {
   return `${storageKey.replace(/\.[a-z0-9]+$/i, "")}.thumb.webp`;
 }
@@ -60,24 +62,30 @@ export async function generateThumbnails(photoIds: string[]): Promise<number> {
   ).catch(() => []);
 
   let made = 0;
-  // One at a time: each original is decoded in full, and serverless memory is finite.
-  for (const row of rows) {
-    try {
-      const original = await getObjectBytes(row.storage_key);
-      if (!original) continue;
+  const queue = [...rows];
+  // A few at a time: a phone original decodes to ~75MB, so this bounds memory
+  // while finishing a whole trip well inside the route's time limit.
+  await Promise.all(
+    Array.from({ length: CONCURRENCY }, async () => {
+      for (let row = queue.shift(); row; row = queue.shift()) {
+        try {
+          const original = await getObjectBytes(row.storage_key);
+          if (!original) continue;
 
-      const key = thumbnailKeyFor(row.storage_key);
-      if (!(await putObject(key, await makeThumbnail(original), "image/webp"))) continue;
+          const key = thumbnailKeyFor(row.storage_key);
+          if (!(await putObject(key, await makeThumbnail(original), "image/webp"))) continue;
 
-      await execute(
-        `update trip_photos set thumbnail_key = $2, updated_at = now()
-          where id = $1 and thumbnail_key is null`,
-        [row.id, key],
-      );
-      made++;
-    } catch (error) {
-      console.error("thumbnail failed", row.id, error);
-    }
-  }
+          await execute(
+            `update trip_photos set thumbnail_key = $2, updated_at = now()
+              where id = $1 and thumbnail_key is null`,
+            [row.id, key],
+          );
+          made++;
+        } catch (error) {
+          console.error("thumbnail failed", row.id, error);
+        }
+      }
+    }),
+  );
   return made;
 }

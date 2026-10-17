@@ -9,6 +9,9 @@ import { generateThumbnails } from "@/lib/photos/thumbnails";
 /** Counts change as people upload, and preview URLs are signed; never cache. */
 export const dynamic = "force-dynamic";
 
+/** Room for the thumbnail work scheduled with after() to finish on a trip's first view. */
+export const maxDuration = 60;
+
 export const metadata: Metadata = {
   title: "Photos - CU Snowboarding",
   robots: { index: false, follow: false },

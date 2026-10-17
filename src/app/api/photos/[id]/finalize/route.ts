@@ -7,6 +7,9 @@ import { resolvePhotoViewer } from "@/lib/photos/viewer";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** Room for the thumbnail work scheduled with after() to finish on a trip's first view. */
+export const maxDuration = 60;
+
 const bodySchema = z.object({
   width: z.number().int().positive().max(100_000).optional().nullable(),
   height: z.number().int().positive().max(100_000).optional().nullable(),

@@ -13,6 +13,9 @@ import { generateThumbnails } from "@/lib/photos/thumbnails";
 /** Signed URLs expire, so this page can never be cached or statically rendered. */
 export const dynamic = "force-dynamic";
 
+/** Room for the thumbnail work scheduled with after() to finish on a trip's first view. */
+export const maxDuration = 60;
+
 type Params = { params: Promise<{ slug: string }> };
 
 /** The metadata and the page both need the trip; one query serves both. */
